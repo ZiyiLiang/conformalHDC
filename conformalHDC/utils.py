@@ -27,8 +27,7 @@ def eval_lc_psets(S,y):
     # Evaluate the label-conditional coverage
     results_tmp = pd.DataFrame({})
 
-    n_class = len(np.unique(y))
-    for i in range(n_class):
+    for i in np.unique(y):
         label = i
         idx = np.where(y==label)[0]
         coverage, length, length_cover = eval_psets(np.array(S, dtype=object)[idx], np.array(y)[idx])
