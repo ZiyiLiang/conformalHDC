@@ -22,22 +22,18 @@ class ConformalHDC():
         # Train the HD model
         self.oneHvPerClass(self.inputs_train, self.labels_train)
         self.labels = list(self.classHVs.keys())
-        
-        self.ratio = False
-        # Compute the calibration scores
-        self.scores_calib = {}
-        scores_calib = self._compute_similarity_scores(self.inputs_calib, self.labels_calib)
-        
-        if self.ratio:
-            opposite_labels = 1-self.labels_calib
-            opposite_scores = self._compute_similarity_scores(self.inputs_calib, opposite_labels)
-            scores_calib /= opposite_scores
 
+        
+    def _compute_calib_scores(self, score_type=None, **kwargs):
+        self.scores_calib = {}
+        scores_calib = self._compute_nonconformity_scores(self.inputs_calib, self.labels_calib, score_type = score_type, **kwargs)
+    
         for i, label in enumerate(self.labels_calib):
             if (label in self.scores_calib.keys()):
                 self.scores_calib[label].append(scores_calib[i])
             else:
                 self.scores_calib[label] = [scores_calib[i]]
+
 
     def oneHvPerClass(self, HVs, labels, normalize=True):
         #This creates a dict with no duplicates
@@ -59,18 +55,47 @@ class ConformalHDC():
         self.countHVs = countHVs
         self.classHVs = classHVs
     
-    # implement the encoding functions and other similarity scores later below 
 
-
-    def _compute_similarity_scores(self, HVs, labels):
-        ''' Computes the similarity scores of the HVs and corresponding classHVs
+    # implement the encoding functions and other nonconformity scores later below 
+    def _compute_nonconformity_scores(self, HVs, labels, 
+                                   score_type=None, **kwargs):
+        ''' Computes the nonconformity scores of the HVs and corresponding classHVs
         '''
 
-        classHVs_batch =  np.array([self.classHVs[label] for label in labels])
+        # Default confomity score is just euclidean distance
+        if score_type == None:
+            classHVs_batch =  np.array([self.classHVs[label] for label in labels])
 
-        if self.sim_measure == "euclidean":
-            scores = np.linalg.norm(HVs - classHVs_batch, axis=1)
+            if self.sim_measure == "euclidean":
+                scores = np.linalg.norm(HVs - classHVs_batch, axis=1)
         
+        else:
+            scores = np.zeros(len(labels))
+            for i, (HV, label) in enumerate(zip(HVs, labels)):
+                sim_all_classes = 0
+                sim_true_class = 0
+                for l in self.labels:
+                    if self.sim_measure == "euclidean":
+                        sim_l = np.linalg.norm(HV - self.classHVs[l])
+                    sim_all_classes += sim_l
+                    if l == label:
+                        sim_true_class = sim_l
+
+                if score_type == "normalized_discount":
+                    score = (sim_all_classes-sim_true_class)/(sim_all_classes)*(1/sim_true_class)
+                elif score_type == "discount":
+                    score = (sim_all_classes-sim_true_class)/(sim_true_class)*(1/sim_true_class)
+                elif score_type == "normalized_ratio":
+                    score = (sim_all_classes-sim_true_class)/(sim_all_classes)
+                elif score_type == "ratio":
+                    score = (sim_all_classes-sim_true_class)/(sim_true_class)
+                elif score_type == "penalized":
+                    penalty = kwargs.get("penalty",1)
+                    sim_other_classes = sim_all_classes - sim_true_class
+                    score = (1/sim_true_class) - penalty*(1/sim_other_classes)
+                # convert the discounted score to noncomformity scores, e.g. small scores <=> more likely to be true labels
+                scores[i] = - score 
+            
         return scores
 
 
@@ -78,7 +103,7 @@ class ConformalHDC():
         scores = []
         n_test = len(inputs_test)
         for label in self.labels:
-            tmp_scores = self._compute_similarity_scores(inputs_test, [label]*n_test).reshape(-1,1)
+            tmp_scores = self._compute_nonconformity_scores(inputs_test, [label]*n_test).reshape(-1,1)
             scores.append(tmp_scores)
         
         scores = np.concatenate(scores,axis=1)
@@ -88,16 +113,21 @@ class ConformalHDC():
         return predictions
 
 
-    def conformalPS(self, inputs_test, alpha, allow_empty=False):
+    def conformalPS(self, inputs_test, alpha, 
+                    score_type=None, allow_empty=False,
+                    **kwargs):
         ''' Computes the conformal prediction sets at significance level alpha
         '''
+
+        self._compute_calib_scores(score_type=score_type, **kwargs)
+
         n_test = len(inputs_test)
         self.quantiles = {}
 
         psets = psets = [[] for _ in range(n_test)] 
         for label in self.labels:
             n_calib = len(self.scores_calib[label])
-            scores = self._compute_similarity_scores(inputs_test, [label]*n_test).reshape(-1,1)
+            scores = self._compute_nonconformity_scores(inputs_test, [label]*n_test, score_type=score_type, **kwargs).reshape(-1,1)
             quantile = np.quantile(self.scores_calib[label], (n_calib+1)*(1-alpha)/n_calib)
             self.quantiles[label] = quantile
 
