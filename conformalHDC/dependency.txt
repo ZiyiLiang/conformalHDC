@@ -1,0 +1,10 @@
+python=3.9.24
+numpy=2.0.2
+matplotlib=3.9.4
+scikit-learn=1.6.1
+scipy=1.13.1
+pandas=2.3.3
+tqdm=4.67.1
+torch=2.8.0+cu126
+torchvision=0.23.0+cu126 
+torch-hd=5.8.4
