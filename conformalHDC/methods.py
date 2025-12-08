@@ -1,11 +1,12 @@
 import numpy as np
 import random
 import pdb
+import itertools
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 
-class ConformalHDC():
+class ConformalHDC_old():
     def __init__(self, inputs, labels, calib_size=0.2, sim_measure="euclidean",
                 random_state=0, verbose=True, progress=True):
 
@@ -229,3 +230,104 @@ class ConformalHDC():
         plt.show()
 
         return plt
+
+
+
+class ConformalHDC():
+    def __init__(self, class_HVs, sim_measure="cosine",
+                random_state=0, verbose=True):
+
+        self.class_HVs = class_HVs   # shape (n_class, dim)
+        self.labels = np.arange(len(self.class_HVs))
+        self.sim_measure = sim_measure
+
+        self.random_state = random_state
+        self.verbose = verbose
+        
+    def compute_calib_scores(self, calib_HVs, calib_labels, score_type="discount", **kwargs):
+        self.calib_scores_per_label = [[] for _ in self.labels]
+        self.n_calib_per_label = [0] * len(self.labels)
+        self.calib_scores = self._compute_nonconformity_scores(calib_HVs, calib_labels, score_type = score_type, **kwargs)
+        self.n_calib = len(self.calib_scores)
+
+        for i, l in enumerate(calib_labels):
+            self.calib_scores_per_label[l].append(self.calib_scores[i])
+            self.n_calib_per_label[l] += 1
+
+    
+    def _sim(self, HV1s, HV2s):
+        ''' Measures the similarities between HVs, larger values corresponds to more similar HVs.
+        '''
+        if self.sim_measure == "euclidean":
+            sims = -np.linalg.norm(HV1s - HV2s, axis=1)
+        elif self.sim_measure == "cosine":
+            dot_products = (HV1s * HV2s).sum(axis=1)
+            an = np.linalg.norm(HV1s, axis=1) # No clamp_min needed usually if inputs are clean
+            bn = np.linalg.norm(HV2s, axis=1)
+            
+            epsilon = 1e-8
+            sims = dot_products / (an * bn + epsilon) 
+        else:
+            print("Unknown similarity measures!")
+        
+        return sims
+
+    # implement the encoding functions and other nonconformity scores later below 
+    def _compute_nonconformity_scores(self, HVs, labels, 
+                                   score_type="discount", **kwargs):
+        ''' Computes the nonconformity scores of the HVs and corresponding classHVs
+        '''
+        scores = np.zeros(len(labels))
+        for i, (HV, label) in enumerate(zip(HVs, labels)):
+            sim_all_classes = 0
+            sim_true_class = 0
+            for l in self.labels:
+                sim = self._sim(HV.reshape(1, -1), self.class_HVs[l].reshape(1, -1))
+                sim_all_classes += sim
+                if l == label:
+                    sim_true_class = sim
+
+            # check the difference between using all classes vs all other classes
+            if score_type == "discount":
+                score = -(sim_true_class/sim_all_classes)*(sim_true_class)
+            elif score_type == "ratio":
+                score = sim_true_class/sim_all_classes
+            elif score_type == "sim":
+                score = -sim_true_class
+            elif score_type == "penalized":
+                penalty = kwargs.get("penalty",1)
+                sim_other_classes = sim_all_classes - sim_true_class
+                score = -sim_true_class + penalty * sim_other_classes
+            scores[i] = score 
+            
+        return scores
+    
+    def set_valued_CP(self, test_HVs, alpha, 
+                    score_type="discount", allow_empty=True,
+                    marginal=False, **kwargs):
+        ''' Computes the conformal prediction sets at significance level alpha
+        '''
+
+        n_test = len(test_HVs)
+        psets = [[] for _ in range(n_test)]
+
+        if marginal: 
+            self.quantile = np.quantile(self.calib_scores, (self.n_calib+1)*(1-alpha)/self.n_calib)
+        else:
+            self.quantiles = [np.quantile(scores, (n+1)*(1-alpha)/n) for scores, n in zip(self.calib_scores_per_label, self.n_calib_per_label)]
+        
+        for label in self.labels:
+            test_scores = self._compute_nonconformity_scores(test_HVs, [label]*n_test, score_type=score_type, **kwargs) 
+            for i in range(n_test):
+                q = self.quantile if marginal else self.quantiles[label]
+                if test_scores[i] <= q:
+                    psets[i].append(label)
+            
+            # Fix the following, replace it with point_valued_CP
+            # if not allow_empty:
+            #     pred = self.predict(inputs_test)
+            #     for i, pset in enumerate(psets):
+            #         if len(pset)==0:
+            #             pset.append(pred[i])
+
+        return psets
