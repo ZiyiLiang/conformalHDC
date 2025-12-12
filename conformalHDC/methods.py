@@ -234,30 +234,52 @@ class ConformalHDC_old():
 
 
 class ConformalHDC():
-    def __init__(self, class_HVs, sim_measure="cosine",
+    def __init__(self, class_HVs, class_labels, sim_measure="cosine",
                 random_state=0, verbose=True):
 
         self.class_HVs = class_HVs   # shape (n_class, dim)
-        self.labels = np.arange(len(self.class_HVs))
+        self.class_labels = class_labels  # real labels (e.g. [1, 5, 9])
+        # Canonical indices (0, 1, 2...) for internal array indexing
+        self.canonical_indices = np.arange(len(self.class_HVs))
+        # Map real labels to canonical indices 
+        self.label_to_idx = {label: i for i, label in enumerate(class_labels)}
+
         self.sim_measure = sim_measure
 
         self.random_state = random_state
         self.verbose = verbose
         
     def compute_calib_scores(self, calib_HVs, calib_labels, score_type="discount", **kwargs):
-        self.calib_scores_per_label = [[] for _ in self.labels]
-        self.n_calib_per_label = [0] * len(self.labels)
-        self.calib_scores = self._compute_nonconformity_scores(calib_HVs, calib_labels, score_type = score_type, **kwargs)
-        self.n_calib = len(self.calib_scores)
+        self.calib_scores_per_label = [[] for _ in self.canonical_indices]
+        self.n_calib_per_label = [0] * len(self.canonical_indices)
 
-        for i, l in enumerate(calib_labels):
-            self.calib_scores_per_label[l].append(self.calib_scores[i])
-            self.n_calib_per_label[l] += 1
+        # Convert incoming real labels to canonical indices
+        # If calib_labels are tensors, convert to list/numpy first
+        if hasattr(calib_labels, 'tolist'):
+            calib_labels = calib_labels.tolist()
+        canonical_labels = [self.label_to_idx[l] for l in calib_labels]
+
+        # Pass canonical labels to the internal score function
+        self.calib_scores = self._compute_nonconformity_scores(
+                    calib_HVs, canonical_labels, score_type=score_type, **kwargs
+                )        
+        self.n_calib = len(self.calib_scores)
+        self.score_type = score_type
+
+        for i, c_idx in enumerate(canonical_labels):
+            self.calib_scores_per_label[c_idx].append(self.calib_scores[i])
+            self.n_calib_per_label[c_idx] += 1
 
     
     def _sim(self, HV1s, HV2s):
         ''' Measures the similarities between HVs, larger values corresponds to more similar HVs.
+            Automatically handles 1D vectors by reshaping them to (1, D).
+            Supports broadcasting (e.g., comparing N vectors vs 1 vector).
         '''
+        # Ensure inputs are at least 2D (shape [N, D] or [1, D])
+        HV1s = np.atleast_2d(HV1s) 
+        HV2s = np.atleast_2d(HV2s)
+
         if self.sim_measure == "euclidean":
             sims = -np.linalg.norm(HV1s - HV2s, axis=1)
         elif self.sim_measure == "cosine":
@@ -273,37 +295,59 @@ class ConformalHDC():
         return sims
 
     # implement the encoding functions and other nonconformity scores later below 
-    def _compute_nonconformity_scores(self, HVs, labels, 
+    def _compute_nonconformity_scores(self, HVs, canonical_targets,
                                    score_type="discount", **kwargs):
-        ''' Computes the nonconformity scores of the HVs and corresponding classHVs
+        ''' Computes the nonconformity scores of the HVs
         '''
-        scores = np.zeros(len(labels))
-        for i, (HV, label) in enumerate(zip(HVs, labels)):
+        rng = np.random.RandomState(self.random_state)
+        scores = np.zeros(len(canonical_targets))
+
+        for i, (HV, target_idx) in enumerate(zip(HVs, canonical_targets)):
+            sims_list = []
             sim_all_classes = 0
             sim_true_class = 0
-            for l in self.labels:
-                sim = self._sim(HV.reshape(1, -1), self.class_HVs[l].reshape(1, -1))
+            for c_idx in self.canonical_indices:
+                sim = self._sim(HV.reshape(1, -1), self.class_HVs[c_idx].reshape(1, -1))
+                sims_list.append(sim.item()) # Ensure it's a scalar
+
                 sim_all_classes += sim
-                if l == label:
+                if c_idx == target_idx:
                     sim_true_class = sim
 
             # check the difference between using all classes vs all other classes
             if score_type == "discount":
                 score = -(sim_true_class/sim_all_classes)*(sim_true_class)
             elif score_type == "ratio":
-                score = sim_true_class/sim_all_classes
+                score = -sim_true_class/sim_all_classes
             elif score_type == "sim":
                 score = -sim_true_class
             elif score_type == "penalized":
                 penalty = kwargs.get("penalty",1)
                 sim_other_classes = sim_all_classes - sim_true_class
                 score = -sim_true_class + penalty * sim_other_classes
+            # Generalized Inverse Quantile Score 
+            elif score_type == "inverse_quantile":
+                # Convert similarities to probabilities via Softmax
+                sims_arr = np.array(sims_list)
+                exp_sims = np.exp(sims_arr - np.max(sims_arr))
+                pi_hat = exp_sims / np.sum(exp_sims)
+                
+                pi_true = pi_hat[target_idx]
+                indices_sorted = np.argsort(pi_hat)
+                pi_sorted = pi_hat[indices_sorted]
+
+                rank_idx = np.where(indices_sorted == target_idx)[0][0]
+                cumulative_prob = np.sum(pi_sorted[:rank_idx+1])
+                
+                # randomize to get exact coverage
+                U = rng.uniform(0, 1)
+                score = - cumulative_prob + U * pi_true 
             scores[i] = score 
             
         return scores
     
     def set_valued_CP(self, test_HVs, alpha, 
-                    score_type="discount", allow_empty=True,
+                    allow_empty=True,
                     marginal=False, **kwargs):
         ''' Computes the conformal prediction sets at significance level alpha
         '''
@@ -311,23 +355,248 @@ class ConformalHDC():
         n_test = len(test_HVs)
         psets = [[] for _ in range(n_test)]
 
+        # check if calibration scores are computed
+        required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
+        if not all(hasattr(self, attr) for attr in required_attrs):
+            print("Compute calibration scores first! (Call function compute_calib_scores)")
+            return 
+        
         if marginal: 
             self.quantile = np.quantile(self.calib_scores, (self.n_calib+1)*(1-alpha)/self.n_calib)
         else:
             self.quantiles = [np.quantile(scores, (n+1)*(1-alpha)/n) for scores, n in zip(self.calib_scores_per_label, self.n_calib_per_label)]
         
-        for label in self.labels:
-            test_scores = self._compute_nonconformity_scores(test_HVs, [label]*n_test, score_type=score_type, **kwargs) 
+        for c_idx in self.canonical_indices:
+            test_scores = self._compute_nonconformity_scores(
+                test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
+            )
             for i in range(n_test):
-                q = self.quantile if marginal else self.quantiles[label]
+                q = self.quantile if marginal else self.quantiles[c_idx]
                 if test_scores[i] <= q:
-                    psets[i].append(label)
+                    real_label = self.class_labels[c_idx]
+                    psets[i].append(real_label)
             
-            # Fix the following, replace it with point_valued_CP
-            # if not allow_empty:
-            #     pred = self.predict(inputs_test)
-            #     for i, pset in enumerate(psets):
-            #         if len(pset)==0:
-            #             pset.append(pred[i])
+            if not allow_empty:
+                for i, pset in enumerate(psets):
+                    if len(pset)==0:
+                        pset.append(self.point_valued_CP(inputs_test[i]))
 
         return psets
+
+
+    def point_valued_CP(self, test_HVs, method='accurate', **kwargs):
+        ''' Computes point-valued predictions (Algorithms 3 & 4).
+            
+            Args:
+                test_HVs: Input hypervectors
+                method: 
+                    If "accurate": Returns the accuracy-firt prediction.
+                    If "efficient": Returns the efficiency-first prediction.
+        '''
+        n_test = len(test_HVs)
+        n_classes = len(self.canonical_indices)
+        
+        # Check if calibration scores are computed
+        required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
+        if not all(hasattr(self, attr) for attr in required_attrs):
+            print("Compute calibration scores first! (Call function compute_calib_scores)")
+            return 
+
+        # Compute Nonconformity Scores for ALL classes for ALL test points
+        all_scores = np.zeros((n_test, n_classes))
+        
+        for c_idx in self.canonical_indices:
+            # Calculate scores as if the test points belonged to class c_idx
+            scores_c = self._compute_nonconformity_scores(
+                test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
+            )
+            all_scores[:, c_idx] = scores_c
+
+        if method == "efficient":
+            # Select the class that yields the lowest nonconformity score 
+            best_canonical_indices = np.argmin(all_scores, axis=1)
+
+        elif method == "accurate":
+            # Select the class where the test point has the highest p-value.
+            p_values = np.zeros((n_test, n_classes))
+
+            for c_idx in self.canonical_indices:
+                # Get calibration scores for this specific class
+                calib_c = np.sort(self.calib_scores_per_label[c_idx])
+                n_calib = len(calib_c)
+                
+                if n_calib == 0:
+                    p_values[:, c_idx] = 0.0 # Avoid div by zero / invalid class
+                    continue
+                
+                test_scores_c = all_scores[:, c_idx]
+                ranks = np.searchsorted(calib_c, test_scores_c, side='left')
+                
+                # Calculate p-value (higher is better/more conformal)
+                p_values[:, c_idx] = (n_calib - ranks + 1) / (n_calib + 1)
+            
+            # Select class with the highest p-value
+            best_canonical_indices = np.argmax(p_values, axis=1)
+        
+        else: 
+            print('Unknown prediction method, choose between "accurate" or "efficient".')
+            return 
+
+        predictions = [self.class_labels[idx] for idx in best_canonical_indices]
+        return np.array(predictions)
+
+
+    # def get_max_p_value(self, test_HVs, **kwargs):
+    #     ''' Calculates the maximum p-value (credibility) for each test sample.
+    #         Used for Out-of-Distribution (OOD) detection.
+            
+    #         Returns: 
+    #             array of shape (n_test,) with values in [0, 1].
+    #             High score = Inlier (fits at least one class well).
+    #             Low score  = Outlier (fits no classes well).
+    #     '''
+    #     n_test = len(test_HVs)
+    #     n_classes = len(self.canonical_indices)
+        
+    #     # Check prerequisites
+    #     required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
+    #     if not all(hasattr(self, attr) for attr in required_attrs):
+    #         print("Compute calibration scores first! (Call function compute_calib_scores)")
+    #         return 
+        
+    #     # Matrix to store p-values for every class: [n_test, n_classes]
+    #     p_values = np.zeros((n_test, n_classes))
+
+    #     for c_idx in self.canonical_indices:
+    #         calib_c = np.sort(self.calib_scores_per_label[c_idx])
+    #         n_calib = len(calib_c)
+            
+    #         if n_calib == 0:
+    #             p_values[:, c_idx] = 0.0
+    #             continue
+
+    #         # Compute nonconformity scores for test points against this class
+    #         test_scores_c = self._compute_nonconformity_scores(
+    #             test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
+    #         )
+            
+    #         # Compute p-values
+    #         ranks = np.searchsorted(calib_c, test_scores_c, side='left')            
+    #         p_values[:, c_idx] = (n_calib - ranks + 1) / (n_calib + 1)
+            
+    #     return np.max(p_values, axis=1)
+
+    # import numpy as np
+
+    def get_max_p_value(self, test_HVs, marginal=False, **kwargs):
+        ''' Calculates the p-value (credibility) for each test sample.
+            Used for Out-of-Distribution (OOD) detection.
+            
+            Args:
+                test_HVs: Test hypervectors or features.
+                marginal (bool): 
+                    If False (default): Computes label-conditional p-values. 
+                    If True: Computes marginal p-values.
+
+            Returns: 
+                array of shape (n_test,) with values in [0, 1].
+                High score = Inlier (fits distribution well).
+                Low score  = Outlier (fits no classes well).
+        '''
+        n_test = len(test_HVs)
+        n_classes = len(self.canonical_indices)
+        
+        # Check prerequisites
+        required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
+        if not all(hasattr(self, attr) for attr in required_attrs):
+            print("Compute calibration scores first! (Call function compute_calib_scores)")
+            return 
+        
+        # --- 1. Compute Test Scores for all classes ---
+        # We need the nonconformity score of the test point against every class 
+        # to determine which class it fits best (min score) or to calculate per-class p-values.
+        
+        # Matrix: [n_test, n_classes]
+        test_scores_matrix = np.zeros((n_test, n_classes))
+
+        # We iterate classes to fill the matrix
+        # (Optimization: If your _compute_nonconformity_scores can handle 
+        # multiple classes at once for the same test set, you could vectorize this loop)
+        for i, c_idx in enumerate(self.canonical_indices):
+            test_scores_matrix[:, i] = self._compute_nonconformity_scores(
+                test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
+            )
+
+        # --- 2. Calculate P-values ---
+        
+        if marginal:
+            # MARGINAL P-VALUE
+            # Reference: Pool of ALL calibration scores (regardless of label)
+            # We assume self.calib_scores contains the scores of calib data against their TRUE labels.
+            if isinstance(self.calib_scores, list):
+                all_calib = np.sort(np.concatenate(self.calib_scores))
+            else:
+                all_calib = np.sort(self.calib_scores.ravel())
+                
+            n_calib = len(all_calib)
+            
+            # Test Statistic: The score of the test point relative to its "predicted" class.
+            # Since we assume High Score = Outlier, the "predicted" class is the one 
+            # with the Lowest nonconformity score (best fit).
+            min_test_scores = np.min(test_scores_matrix, axis=1)
+            
+            # Calculate p-value against the global pool
+            ranks = np.searchsorted(all_calib, min_test_scores, side='left')
+            p_values = (n_calib - ranks + 1) / (n_calib + 1)
+            return p_values
+
+        else:
+            # LABEL-CONDITIONAL P-VALUE (Original Logic)
+            # Reference: Separate distributions per class
+            p_values_matrix = np.zeros((n_test, n_classes))
+            
+            for i, c_idx in enumerate(self.canonical_indices):
+                calib_c = np.sort(self.calib_scores_per_label[c_idx])
+                n_calib = len(calib_c)
+                
+                if n_calib == 0:
+                    p_values_matrix[:, i] = 0.0
+                    continue
+                
+                # Retrieve pre-calculated scores for this class
+                test_scores_c = test_scores_matrix[:, i]
+                
+                # Compute p-value within this specific class distribution
+                ranks = np.searchsorted(calib_c, test_scores_c, side='left')            
+                p_values_matrix[:, i] = (n_calib - ranks + 1) / (n_calib + 1)
+                
+            # Return the best p-value across all possible classes
+            return np.max(p_values_matrix, axis=1)
+
+
+    def predict(self, test_HVs):
+        ''' Performs standard HDC classification (Argmax Similarity).
+            
+            Args:
+                test_HVs: Input hypervectors (n_test, dim)
+            Returns:
+                predictions: Array of predicted class labels
+        '''
+        n_test = len(test_HVs)
+        n_classes = len(self.canonical_indices)
+        
+        # Matrix to store similarities: [n_test, n_classes]
+        sim_matrix = np.zeros((n_test, n_classes))
+        
+        for c_idx in self.canonical_indices:
+            # Get the prototype for class c_idx 
+            proto = self.class_HVs[c_idx].reshape(1, -1)
+            
+            # Compute similarity between ALL test HVs and THIS prototype
+            sim_matrix[:, c_idx] = self._sim(test_HVs, proto)
+            
+        best_canonical_indices = np.argmax(sim_matrix, axis=1)        
+        predictions = [self.class_labels[idx] for idx in best_canonical_indices]
+        
+        return np.array(predictions)
+    

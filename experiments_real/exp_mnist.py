@@ -1,0 +1,287 @@
+import sys
+import os
+import time
+import torch
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from torch.utils.data import DataLoader, Subset, ConcatDataset, random_split
+from torchvision import datasets, transforms
+from sklearn.metrics import roc_auc_score, roc_curve
+
+# --- Library Imports ---
+sys.path.append('../') 
+try:
+    # Attempting wildcard imports as per notebook, though explicit is usually safer
+    from conformalHDC.models import *
+    from conformalHDC.methods import *
+    from conformalHDC.utils import *
+except ImportError:
+    # Fallback if specific modules aren't found directly (e.g. running standalone)
+    try:
+        from conformalHDC.models import ConformalHDC
+        from conformalHDC.utils import eval_accuracy
+    except ImportError:
+        print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
+
+#########################
+# Experiment parameters #
+#########################
+if True:
+    # Parse input arguments
+    print('Number of arguments:', len(sys.argv), 'arguments.')
+    print('Argument List:', str(sys.argv))
+    if len(sys.argv) != 2:
+        print("Error: incorrect number of parameters. Usage: python exp_mnist.py <seed_group_id>")
+        sys.exit(1)
+
+    seed_group_id = int(sys.argv[1])
+
+# Fixed parameters
+EXP_NAME = "mnist"
+REPETITIONS = 1  # Number of runs per job
+DIM = 10_000
+BATCH_SIZE = 512
+LABELS_ID = [0, 2, 3, 5, 6, 8]
+LABELS_OOD = [1, 4, 7, 9]
+ALPHA = 0.1
+# Using all score types as requested in original prompt, despite notebook testing only one
+SCORE_TYPES = ["sim", "ratio", "discount", "penalized", "inverse_quantile"]
+
+# Directory Setup
+OUT_DIR = f"./results/{EXP_NAME}"
+os.makedirs(OUT_DIR, exist_ok=True)
+outfile = os.path.join(OUT_DIR, f"seed{seed_group_id}.csv")
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+################======== Utility Functions ========################
+
+@torch.no_grad()
+def bipolar_sign(x):
+    return torch.where(x >= 0, torch.ones_like(x), -torch.ones_like(x))
+
+def make_position_hvs(n_positions, dim, device=None):
+    device = device or DEVICE
+    return (torch.randint(0, 2, (n_positions, dim), device=device, dtype=torch.float32) * 2 - 1)
+
+@torch.no_grad()
+def encode_binary_images_to_hvs(imgs, pos_hvs, threshold=0.5):
+    B, C, H, W = imgs.shape
+    x = (imgs.view(B, -1) >= threshold).to(torch.float32).to(pos_hvs.device)
+    return bipolar_sign(x @ pos_hvs)
+
+@torch.no_grad()
+def build_prototypes(loader, pos_hvs, class_labels):
+    D = pos_hvs.shape[1]
+    n_classes = len(class_labels)
+    accum = torch.zeros((n_classes, D), device=pos_hvs.device)
+    
+    for imgs, labels in loader:
+        imgs, labels = imgs.to(pos_hvs.device), labels.to(pos_hvs.device)
+        hvs = encode_binary_images_to_hvs(imgs, pos_hvs)
+        for i, lbl in enumerate(class_labels):
+            m = (labels == lbl)
+            if m.any():
+                accum[i] += hvs[m].sum(dim=0)
+    return bipolar_sign(accum)
+
+@torch.no_grad()
+def cosine_sim(a, b):
+    a, b = a.float(), b.float()
+    an = torch.norm(a, dim=1, keepdim=True).clamp_min(1e-8)
+    bn = torch.norm(b, dim=1, keepdim=True).clamp_min(1e-8).T
+    return (a @ b.T) / (an * bn)
+
+def get_hvs_labels(loader, pos_hvs):
+    all_hvs, all_labels = [], []
+    for imgs, labels in loader:
+        imgs = imgs.to(pos_hvs.device)
+        hvs = encode_binary_images_to_hvs(imgs, pos_hvs)
+        all_hvs.append(hvs.cpu().numpy())
+        all_labels.append(labels.numpy())
+    return np.concatenate(all_hvs), np.concatenate(all_labels)
+
+################======== Experiment Logic ========################
+
+def run_single_experiment(random_state):
+    # Reproducibility
+    np.random.seed(random_state)
+    torch.manual_seed(random_state)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(random_state)
+    
+    # 1. Data Prep & Splitting
+    transform = transforms.ToTensor()
+    ds_full = ConcatDataset([
+        datasets.MNIST(root='./data', train=True, transform=transform, download=True),
+        datasets.MNIST(root='./data', train=False, transform=transform, download=True)
+    ])
+    
+    # Extract labels to filter
+    targets = np.concatenate([d.targets.numpy() for d in ds_full.datasets])
+    id_idx = np.where(np.isin(targets, LABELS_ID))[0]
+    ood_idx = np.where(np.isin(targets, LABELS_OOD))[0]
+    
+    ds_id = Subset(ds_full, id_idx)
+    ds_ood = Subset(ds_full, ood_idx)
+    
+    # Split ID: 80% Train, 15% Calib, ~5% Test (Updated as per notebook)
+    n_total = len(ds_id)
+    n_train = int(0.8 * n_total)
+    n_calib = int(0.15 * n_total)
+    n_test = n_total - n_train - n_calib
+    
+    ds_train, ds_calib, ds_test = random_split(
+        ds_id, [n_train, n_calib, n_test], 
+        generator=torch.Generator().manual_seed(random_state)
+    )
+    
+    # Loaders
+    ld_train = DataLoader(ds_train, batch_size=BATCH_SIZE, shuffle=True)
+    ld_calib = DataLoader(ds_calib, batch_size=BATCH_SIZE, shuffle=False)
+    ld_test = DataLoader(ds_test, batch_size=BATCH_SIZE, shuffle=False)
+    ld_ood = DataLoader(ds_ood, batch_size=BATCH_SIZE, shuffle=False)
+    
+    # 2. HDC Init
+    pos_hvs = make_position_hvs(28*28, DIM, device=DEVICE)
+    
+    # 3. Train Models
+    # A. Conformal Model (Train only)
+    protos_conf = build_prototypes(ld_train, pos_hvs, LABELS_ID)
+    
+    # B. Vanilla Baseline (Train + Calib)
+    ds_vanilla = ConcatDataset([ds_train, ds_calib])
+    ld_vanilla = DataLoader(ds_vanilla, batch_size=BATCH_SIZE, shuffle=True)
+    protos_vanilla = build_prototypes(ld_vanilla, pos_hvs, LABELS_ID)
+    
+    # 4. Pre-compute HVs for inference speed
+    calib_hvs, calib_y = get_hvs_labels(ld_calib, pos_hvs)
+    test_hvs, test_y = get_hvs_labels(ld_test, pos_hvs)
+    ood_hvs, ood_y = get_hvs_labels(ld_ood, pos_hvs)
+    
+    # Balance OOD to match Test size (Updated as per notebook)
+    min_len = min(len(ood_hvs), len(test_hvs))
+    ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
+    
+    chdc = ConformalHDC(protos_conf.cpu().numpy(), LABELS_ID)
+    
+    exp_results = []
+    
+    # --- Experiment Loop per Score Type ---
+    for stype in SCORE_TYPES:
+        chdc.compute_calib_scores(calib_hvs, calib_y, score_type=stype)
+        
+        # [Exp 1] Set-Valued Coverage & Width
+        for marginal in [True, False]:
+            psets = chdc.set_valued_CP(test_hvs, ALPHA, marginal=marginal)
+            sizes = [len(p) for p in psets]
+            covered = [1 if y in p else 0 for y, p in zip(test_y, psets)]
+            
+            # Label conditional coverage
+            lc_covs = []
+            for lbl in LABELS_ID:
+                lbl_idx = np.where(test_y == lbl)[0]
+                if len(lbl_idx) > 0:
+                    lc_covs.append(np.mean([covered[i] for i in lbl_idx]))
+            
+            exp_results.append({
+                "exp": "set_valued",
+                "random_state": random_state,
+                "score_type": stype,
+                "marginal": marginal,
+                "avg_size": np.mean(sizes),
+                "marginal_cov": np.mean(covered),
+                "min_class_cov": np.min(lc_covs) if lc_covs else 0.0,
+                # Placeholders
+                "accuracy": np.nan, "auroc": np.nan, "fpr95": np.nan, "method": np.nan
+            })
+
+        # [Exp 2] Point-Valued Accuracy (Conformal)
+        # Updated to include "efficient" as per notebook
+        for method in ["accurate", "efficient"]:
+            preds = chdc.point_valued_CP(test_hvs, method=method)
+            acc = eval_accuracy(preds, test_y)
+            exp_results.append({
+                "exp": "accuracy",
+                "random_state": random_state,
+                "score_type": stype,
+                "method": f"cp_{method}",
+                "accuracy": acc,
+                # Placeholders
+                "marginal": np.nan, "avg_size": np.nan, "marginal_cov": np.nan, 
+                "min_class_cov": np.nan, "auroc": np.nan, "fpr95": np.nan
+            })
+
+        # [Exp 3] OOD Detection
+        for marginal in [True, False]:
+            in_scores = chdc.get_max_p_value(test_hvs, marginal=marginal)
+            out_scores = chdc.get_max_p_value(ood_hvs, marginal=marginal)
+            
+            # Eval
+            y_true = np.concatenate([np.ones(len(in_scores)), np.zeros(len(out_scores))]) # ID=1, OOD=0
+            y_scores = np.concatenate([in_scores, out_scores])
+            
+            auroc = roc_auc_score(y_true, y_scores)
+            
+            # FPR95
+            fpr, tpr, _ = roc_curve(1 - y_true, 1 - y_scores)
+            idx = np.argmin(np.abs(tpr - 0.95))
+            fpr95 = fpr[idx]
+            
+            exp_results.append({
+                "exp": "ood",
+                "random_state": random_state,
+                "score_type": stype,
+                "marginal": marginal,
+                "auroc": auroc,
+                "fpr95": fpr95,
+                # Placeholders
+                "accuracy": np.nan, "avg_size": np.nan, "marginal_cov": np.nan, 
+                "min_class_cov": np.nan, "method": np.nan
+            })
+
+    # [Exp 2b] Vanilla Baseline (Computed once per seed, outside score loop)
+    sims = cosine_sim(torch.tensor(test_hvs, device=DEVICE), protos_vanilla)
+    preds_vanilla_idx = sims.argmax(dim=1).cpu().numpy()
+    preds_vanilla = np.array([LABELS_ID[i] for i in preds_vanilla_idx])
+    acc_vanilla = np.mean(preds_vanilla == test_y)
+    
+    exp_results.append({
+        "exp": "accuracy",
+        "random_state": random_state,
+        "score_type": "cosine",
+        "method": "vanilla_hdc",
+        "accuracy": acc_vanilla,
+        # Placeholders
+        "marginal": np.nan, "avg_size": np.nan, "marginal_cov": np.nan, 
+        "min_class_cov": np.nan, "auroc": np.nan, "fpr95": np.nan
+    })
+
+    return pd.DataFrame(exp_results)
+
+#####################
+#  Run Experiments  #
+#####################
+results_list = []
+
+print(f"Starting job with seed_group_id {seed_group_id}, running {REPETITIONS} repetitions.")
+
+for i in tqdm(range(1, REPETITIONS + 1), desc="Repetitions"):
+    # Generate unique seed based on group ID and repetition index
+    current_seed = REPETITIONS * (seed_group_id - 1) + i
+    
+    try:
+        df_rep = run_single_experiment(current_seed)
+        df_rep['seed_group'] = seed_group_id
+        results_list.append(df_rep)
+    except Exception as e:
+        print(f"Error in seed {current_seed}: {e}")
+        # Optional: raise e if you want to stop the job on error
+
+if results_list:
+    final_df = pd.concat(results_list, ignore_index=True)
+    final_df.to_csv(outfile, index=False)
+    print(f"\nResults saved to {outfile}")
+else:
+    print("No results generated.")

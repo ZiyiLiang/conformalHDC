@@ -36,3 +36,21 @@ def eval_lc_psets(S,y):
         results_tmp["class"+str(label)+"-LC-size"] = [length]
         results_tmp["class"+str(label)+"-LC-size|cov"] = [length_cover]
     return results_tmp
+
+
+def eval_accuracy(y_pred, y_true):
+    ''' Computes standard classification accuracy. 
+        Args:
+            y_pred: Array-like of predicted labels.
+            y_true: Array-like of ground truth labels.
+        Returns:
+            Float accuracy score [0.0, 1.0].
+    '''
+    # Ensure inputs are numpy arrays for element-wise comparison
+    y_pred = np.array(y_pred)
+    y_true = np.array(y_true)
+    
+    if len(y_pred) != len(y_true):
+        raise ValueError(f"Shape mismatch: preds {len(y_pred)} vs true {len(y_true)}")
+        
+    return np.mean(y_pred == y_true)
