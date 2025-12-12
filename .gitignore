@@ -163,3 +163,22 @@ cython_debug/
 
 # Data files
 **/[Dd]ata*
+notebooks/checkpoints*/
+notebooks/logs*/
+checkpoints/
+results*/
+logs*/
+
+# Memos
+memo.txt
+
+# remote server
+setup
+cleanup
+
+# R
+.RData
+.Rhistory
+
+# Latex
+paper/
