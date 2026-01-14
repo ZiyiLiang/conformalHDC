@@ -2,12 +2,12 @@
 
 # Parameters
 # This runs 10 jobs. Since each job has 10 reps, total = 100 independent runs.
-SEED_LIST=$(seq 1 20)
+SEED_LIST=$(seq 1 1)
 EXPNAME="mnist"
 
 # Slurm parameters
 MEMO=8G                             # Memory (8GB is plenty for MNIST HDC)
-TIME=00-01:00:00                    # Time (20 mins to be safe)
+TIME=00-08:00:00                    # Time (20 mins to be safe)
 CORE=1                              # Cores
 GPU=1                               # Request 1 GPU
 
