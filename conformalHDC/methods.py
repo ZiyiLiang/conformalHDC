@@ -289,6 +289,9 @@ class ConformalHDC():
             
             epsilon = 1e-8
             sims = dot_products / (an * bn + epsilon) 
+        elif self.sim_measure == "complex_cosine":
+            D = HV1s.shape[1]
+            sims = np.real(np.sum(HV1s * np.conj(HV2s), axis=1)) / D
         else:
             print("Unknown similarity measures!")
         
