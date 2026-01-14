@@ -54,6 +54,8 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
     with in_path_ood.open("rb") as f:
         run_data = pickle.load(f)
     X_ood = run_data[rat_id]['binned_spk']
+    print(f"Data loaded.")
+    sys.stdout.flush()
 
     # Encoder Setup
     n, nT, p = X_train.shape 
@@ -71,6 +73,8 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
     proto_dict = rff.build_class_prototypes(enc_train, y_train)
     unique_labels = sorted(np.unique(y_train))
     proto_matrix = np.stack([proto_dict[k] for k in unique_labels])
+    print("Prototypes built.")
+    sys.stdout.flush()
     
     chdc = ConformalHDC(class_HVs=proto_matrix, class_labels=unique_labels, sim_measure="complex_cosine")
     
@@ -146,6 +150,8 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
                 "min_class_cov": np.nan, "method": np.nan
             })
+    print("Finished running conformaHDC.")
+    sys.stdout.flush()
 
     # Baseline Vanilla HDC (Once per seed)
     preds_vanilla_idx = chdc.predict(enc_test)
@@ -164,6 +170,8 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
         "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
         "min_class_cov": np.nan, "ood_auroc": np.nan
     })
+    print("Finished running vanilla HDC.")
+    sys.stdout.flush()
 
     return pd.DataFrame(exp_results)
 
