@@ -298,27 +298,20 @@ def check_dist(X,y):
     print(f"Raw Euclidean Dist | Same: {avg_dist_same:.2f} | Diff: {avg_dist_diff:.2f}")
 
 def check_beta_health(model, X, y, beta):
-    # 1. Encode Data
-    # Assuming W_neurons and Time_Base are already generated in model
+    # Encode Data, assuming W_neurons and Time_Base are already generated in model
     H = model.encode_all(model.W, X, model.TB, beta)
     
     # Compute similarity matrix (Real part of Hermitian product)
-    # Sim(u, v) = Re(u . v*) / D
     gram = np.real(H @ H.conj().T) / model.D
     
-    # 3. Mask for Same Class vs Diff Class
-    # same_class_mask[i, j] is True if y[i] == y[j]
+    # Mask for Same Class vs Diff Class
     same_class_mask = y[:, None] == y[None, :]
     np.fill_diagonal(same_class_mask, False) # Ignore self-similarity
     
     diff_class_mask = ~same_class_mask
     
-    # 4. Compute Averages
+    # Compute Averages
     avg_intra = gram[same_class_mask].mean()
     avg_inter = gram[diff_class_mask].mean()
     
     print(f"Beta: {beta:.2f} | within : {avg_intra:.3f} | between : {avg_inter:.3f} | Delta: {avg_intra - avg_inter:.3f}")
-
-# # Example Usage loop
-# for b in [0.1, 0.15,0.2,0.25,0.3]:
-#     check_beta_health(rff, Xtr_z, splits.train.y, b)
