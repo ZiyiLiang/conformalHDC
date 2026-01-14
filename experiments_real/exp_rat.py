@@ -154,8 +154,7 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
     sys.stdout.flush()
 
     # Baseline Vanilla HDC (Once per seed)
-    preds_vanilla_idx = chdc.predict(enc_test)
-    preds_vanilla = np.array([unique_labels[i] for i in preds_vanilla_idx])
+    preds_vanilla = chdc.predict(enc_test)
     acc_vanilla = accuracy_score(y_test, preds_vanilla)
     
     exp_results.append({
