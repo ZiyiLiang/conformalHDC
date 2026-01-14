@@ -282,22 +282,24 @@ class ConformalHDC():
 
         if self.sim_measure == "euclidean":
             sims = -np.linalg.norm(HV1s - HV2s, axis=1)
+        
         elif self.sim_measure == "cosine":
             dot_products = (HV1s * HV2s).sum(axis=1)
-            an = np.linalg.norm(HV1s, axis=1) # No clamp_min needed usually if inputs are clean
+            an = np.linalg.norm(HV1s, axis=1)
             bn = np.linalg.norm(HV2s, axis=1)
-            
             epsilon = 1e-8
             sims = dot_products / (an * bn + epsilon) 
+        
         elif self.sim_measure == "complex_cosine":
             D = HV1s.shape[1]
             sims = np.real(np.sum(HV1s * np.conj(HV2s), axis=1)) / D
+        
         else:
             print("Unknown similarity measures!")
         
         return sims
 
-    # implement the encoding functions and other nonconformity scores later below 
+
     def _compute_nonconformity_scores(self, HVs, canonical_targets,
                                    score_type="discount", **kwargs):
         ''' Computes the nonconformity scores of the HVs
@@ -317,7 +319,6 @@ class ConformalHDC():
                 if c_idx == target_idx:
                     sim_true_class = sim
 
-            # check the difference between using all classes vs all other classes
             if score_type == "discount":
                 score = -(sim_true_class/sim_all_classes)*(sim_true_class)
             elif score_type == "ratio":
@@ -349,6 +350,7 @@ class ConformalHDC():
             
         return scores
     
+
     def set_valued_CP(self, test_HVs, alpha, 
                     allow_empty=True,
                     marginal=False, **kwargs):
@@ -449,52 +451,9 @@ class ConformalHDC():
         return np.array(predictions)
 
 
-    # def get_max_p_value(self, test_HVs, **kwargs):
-    #     ''' Calculates the maximum p-value (credibility) for each test sample.
-    #         Used for Out-of-Distribution (OOD) detection.
-            
-    #         Returns: 
-    #             array of shape (n_test,) with values in [0, 1].
-    #             High score = Inlier (fits at least one class well).
-    #             Low score  = Outlier (fits no classes well).
-    #     '''
-    #     n_test = len(test_HVs)
-    #     n_classes = len(self.canonical_indices)
-        
-    #     # Check prerequisites
-    #     required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
-    #     if not all(hasattr(self, attr) for attr in required_attrs):
-    #         print("Compute calibration scores first! (Call function compute_calib_scores)")
-    #         return 
-        
-    #     # Matrix to store p-values for every class: [n_test, n_classes]
-    #     p_values = np.zeros((n_test, n_classes))
-
-    #     for c_idx in self.canonical_indices:
-    #         calib_c = np.sort(self.calib_scores_per_label[c_idx])
-    #         n_calib = len(calib_c)
-            
-    #         if n_calib == 0:
-    #             p_values[:, c_idx] = 0.0
-    #             continue
-
-    #         # Compute nonconformity scores for test points against this class
-    #         test_scores_c = self._compute_nonconformity_scores(
-    #             test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
-    #         )
-            
-    #         # Compute p-values
-    #         ranks = np.searchsorted(calib_c, test_scores_c, side='left')            
-    #         p_values[:, c_idx] = (n_calib - ranks + 1) / (n_calib + 1)
-            
-    #     return np.max(p_values, axis=1)
-
-    # import numpy as np
-
     def get_max_p_value(self, test_HVs, marginal=False, **kwargs):
-        ''' Calculates the p-value (credibility) for each test sample.
-            Used for Out-of-Distribution (OOD) detection.
-            
+        ''' Calculates the p-value based OOD score (credibility) for each test sample.
+
             Args:
                 test_HVs: Test hypervectors or features.
                 marginal (bool): 
@@ -515,27 +474,15 @@ class ConformalHDC():
             print("Compute calibration scores first! (Call function compute_calib_scores)")
             return 
         
-        # --- 1. Compute Test Scores for all classes ---
-        # We need the nonconformity score of the test point against every class 
-        # to determine which class it fits best (min score) or to calculate per-class p-values.
-        
-        # Matrix: [n_test, n_classes]
+        # Compute the nonconformity score of the test point against every class: [n_test, n_classes]
         test_scores_matrix = np.zeros((n_test, n_classes))
-
-        # We iterate classes to fill the matrix
-        # (Optimization: If your _compute_nonconformity_scores can handle 
-        # multiple classes at once for the same test set, you could vectorize this loop)
         for i, c_idx in enumerate(self.canonical_indices):
             test_scores_matrix[:, i] = self._compute_nonconformity_scores(
                 test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
             )
 
-        # --- 2. Calculate P-values ---
-        
+        # Calculate p-values based OOD scores
         if marginal:
-            # MARGINAL P-VALUE
-            # Reference: Pool of ALL calibration scores (regardless of label)
-            # We assume self.calib_scores contains the scores of calib data against their TRUE labels.
             if isinstance(self.calib_scores, list):
                 all_calib = np.sort(np.concatenate(self.calib_scores))
             else:
@@ -543,19 +490,15 @@ class ConformalHDC():
                 
             n_calib = len(all_calib)
             
-            # Test Statistic: The score of the test point relative to its "predicted" class.
-            # Since we assume High Score = Outlier, the "predicted" class is the one 
-            # with the Lowest nonconformity score (best fit).
+            # Since we assume High Score = Outlier, the "predicted" class is the one with the Lowest nonconformity score (best fit).
             min_test_scores = np.min(test_scores_matrix, axis=1)
             
-            # Calculate p-value against the global pool
+            # Calculate p-value against the all calibration points 
             ranks = np.searchsorted(all_calib, min_test_scores, side='left')
             p_values = (n_calib - ranks + 1) / (n_calib + 1)
             return p_values
 
         else:
-            # LABEL-CONDITIONAL P-VALUE (Original Logic)
-            # Reference: Separate distributions per class
             p_values_matrix = np.zeros((n_test, n_classes))
             
             for i, c_idx in enumerate(self.canonical_indices):
@@ -569,7 +512,7 @@ class ConformalHDC():
                 # Retrieve pre-calculated scores for this class
                 test_scores_c = test_scores_matrix[:, i]
                 
-                # Compute p-value within this specific class distribution
+                # Compute label-conditional p-value within this specific class
                 ranks = np.searchsorted(calib_c, test_scores_c, side='left')            
                 p_values_matrix[:, i] = (n_calib - ranks + 1) / (n_calib + 1)
                 

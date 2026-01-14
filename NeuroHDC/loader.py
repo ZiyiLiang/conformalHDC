@@ -35,12 +35,11 @@ class RLoader:
 
 
     def load_whole_session(self,spk_raw = False):
-        # 1. load the whole session data and compute the firing rate for the whole session
+        #  load the whole session data and compute the firing rate for the whole session
         if spk_raw:
             r_file = self.path + "EnsembleMat_raw.RData"
         else:
             r_file = self.path + "EnsembleMat_sd5.RData"
-        # print(r_file)
 
         robjects.r(f'load("{r_file}")')  # Loads the objects into R's environment
 
@@ -119,37 +118,3 @@ class RLoader:
                 test_data.append(pl_df)
         print(f"total rat number for test is:{len(test_data)}")
         return test_data
-
-    # def load_raw_spk_py(self):
-    #     # load k's data
-    #     raw_path = ['081106_barat/081106_barat_', 
-    #             '090420_buchanan/090420_buchanan_',
-    #             '080718_mitt/080718_mitt_',
-    #             '090212_stella/090212_stella_',
-    #             '090212_superchris/090212_superchris_']
-                
-    #     rat_name = ['Barat','Buchanan','Mitt','Stella','SuperChris']
-    #     raw_spk_list = [] 
-    #     epoched_spk_list = []
-
-    #     for irat in range(0,5):
-    #         current_path = raw_path[irat]
-    #         spk = np.load('raw_data/' + current_path + 'spk.npz')
-    #         behav = np.load('raw_data/' + current_path + 'bvr.npz')
-    #         spk_dict = {
-    #             'rat': rat_name[irat], 'keys': spk['keys'], 'spk': spk['data'],
-    #             'behav_keys': behav['keys'], 'behav': behav['data']}
-
-    #         raw_spk_list.append(spk_dict) 
-    
-    #         epo_spk = np.load('epoched_data/' + current_path + 'tsr_w-4000_spk.npz')
-    #         epo_behav = np.load('epoched_data/' + current_path + 'tsr_w-4000_bvr.npz')
-    #         epo_spk_dict = {
-    #             'rat': rat_name[irat], 
-    #             'keys': epo_spk['keys'], 'spk': epo_spk['data'],
-    #             'behav_keys': epo_behav['keys'], 'behav': epo_behav['data']}
-
-    #         epoched_spk_list.append(epo_spk_dict) 
-    #         print(rat_name[irat], 'finish spk:', spk['data'].shape, 'behav:', behav['data'].shape )
-    #     return raw_spk_list,epoched_spk_list
- 
