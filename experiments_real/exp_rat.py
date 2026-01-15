@@ -22,8 +22,8 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "odor_decoding"
-REPETITIONS = 2
-#REPETITIONS = 100
+#REPETITIONS = 2
+REPETITIONS = 100
 DIM = 15_000
 BETA = 0.3
 SCORE_TYPES = ["sim", "ratio", "discount", "penalized", "inverse_quantile"]

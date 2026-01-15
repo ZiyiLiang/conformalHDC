@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
-RAT_LIST=(0)
-ALPHA_LIST=(0.2)
+# SEED_LIST=(1)
+# RAT_LIST=(0)
+# ALPHA_LIST=(0.2)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=(1)
-# RAT_LIST=$(seq 0 4)      
-# ALPHA_LIST=(0.1 0.2 0.3) 
+SEED_LIST=(1)
+RAT_LIST=$(seq 0 4)      
+ALPHA_LIST=(0.1 0.2 0.3) 
 
 # Slurm parameters (CPU Only)
 EXPNAME="odor_decoding"
