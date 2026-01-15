@@ -25,7 +25,6 @@ EXP_NAME = "odor_decoding"
 #REPETITIONS = 2
 REPETITIONS = 100
 DIM = 15_000
-BETA = 0.3
 SCORE_TYPES = ["sim", "ratio", "discount", "penalized", "inverse_quantile"]
 TRAINING_WINDOW = (200, 600)
 RUNNING_WINDOW = (0, 200)
@@ -34,7 +33,7 @@ SLICING_WINDOW = 200
 STEP_BINS = 2
 
 
-def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
+def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path_ood):
     # Data Loading (Function imported from NeuroHDC.fn)
     splits = prep_loader_slicing(
         irat=rat_id, 
@@ -64,10 +63,10 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
     TB = rff.gen_time_base()
     
     # Encode
-    enc_train = rff.encode_all(W, X_train, TB, beta=BETA)
-    enc_cal   = rff.encode_all(W, X_cal, TB, beta=BETA)
-    enc_test  = rff.encode_all(W, X_test, TB, beta=BETA)
-    enc_ood   = rff.encode_all(W, X_ood, TB, beta=BETA)
+    enc_train = rff.encode_all(W, X_train, TB, beta=beta)
+    enc_cal   = rff.encode_all(W, X_cal, TB, beta=beta)
+    enc_test  = rff.encode_all(W, X_test, TB, beta=beta)
+    enc_ood   = rff.encode_all(W, X_ood, TB, beta=beta)
     
     # Prototypes & ConformalHDC
     proto_dict = rff.build_class_prototypes(enc_train, y_train)
@@ -103,6 +102,7 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
                 "rat_id": rat_id,
                 "score_type": stype,
                 "alpha": alpha,
+                "beta": beta,
                 "marginal": marginal,
                 "set_cov": np.mean(covered),
                 "set_size": np.mean(sizes),
@@ -122,6 +122,7 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
                 "rat_id": rat_id,
                 "score_type": stype,
                 "alpha": alpha,
+                "beta": beta,
                 "method": method,
                 "point_acc": acc_pt,
                 # Placeholders
@@ -144,6 +145,7 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
                 "rat_id": rat_id,
                 "score_type": stype,
                 "alpha": alpha,
+                "beta": beta,
                 "marginal": marginal,
                 "ood_auroc": ood_auroc,
                 # Placeholders
@@ -163,6 +165,7 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
         "rat_id": rat_id,
         "score_type": "cosine",
         "alpha": np.nan,
+        "beta": beta,
         "method": "vanilla",
         "point_acc": acc_vanilla,
         # Placeholders
@@ -180,13 +183,14 @@ def run_single_experiment(random_state, rat_id, alpha, in_path_id, in_path_ood):
 # Main Execution
 # ---------------
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
+    if len(sys.argv) != 5:
         print("Usage: python exp_rat.py <seed> <rat_id> <alpha>")
         sys.exit(1)
 
     seed_arg = int(sys.argv[1])
     rat_arg = int(sys.argv[2])
     alpha_arg = float(sys.argv[3])
+    beta_arg = float(sys.argv[4])
 
     # Paths
     path_id = Path("../data/rat") / f"odor_prep_{TRAINING_WINDOW}_{BIN_SIZE}.pickle"
@@ -196,9 +200,9 @@ if __name__ == "__main__":
     out_dir = Path(f"./results/{EXP_NAME}")
     out_dir.mkdir(parents=True, exist_ok=True)
     # rat_name = ['Barat','Buchanan','Mitt','Stella','Superchris']
-    outfile = out_dir / f"rat{rat_arg}_seed{seed_arg}_alpha{alpha_arg}.csv"  
+    outfile = out_dir / f"rat{rat_arg}_seed{seed_arg}_alpha{alpha_arg}_beta{beta_arg}.csv"  
 
-    print(f"Starting job: Rat {rat_arg}, Seed {seed_arg}, Alpha {alpha_arg}, Reps {REPETITIONS}")
+    print(f"Starting job: Rat {rat_arg}, Seed {seed_arg}, Alpha {alpha_arg}, Beta {beta_arg}, Reps {REPETITIONS}")
 
     results_list = []
     
@@ -207,7 +211,7 @@ if __name__ == "__main__":
         current_state = REPETITIONS * (seed_arg - 1) + i
         
         try:
-            df_rep = run_single_experiment(current_state, rat_arg, alpha_arg, path_id, path_ood)
+            df_rep = run_single_experiment(current_state, rat_arg, alpha_arg, beta_arg, path_id, path_ood)
             results_list.append(df_rep)
         except Exception as e:
             print(f"Error in state {current_state}: {e}")

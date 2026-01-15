@@ -9,6 +9,7 @@
 SEED_LIST=(1)
 RAT_LIST=$(seq 0 4)      
 ALPHA_LIST=(0.1 0.2 0.3) 
+BETA_LIST=(0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0)
 
 # Slurm parameters (CPU Only)
 EXPNAME="odor_decoding"
