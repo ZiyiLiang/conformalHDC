@@ -9,7 +9,7 @@
 SEED_LIST=(1)
 RAT_LIST=$(seq 0 4)      
 ALPHA_LIST=(0.1 0.2 0.3) 
-BETA_LIST=(0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0)
+BETA_LIST=(0.3 0.5 0.7 1.0)
 
 # Slurm parameters (CPU Only)
 EXPNAME="odor_decoding"
@@ -31,38 +31,38 @@ comp=0
 incomp=0
 
 for RAT in ${RAT_LIST[@]}; do
-    mkdir -p $OUT_DIR
-
     for SEED in ${SEED_LIST[@]}; do
         for ALPHA in ${ALPHA_LIST[@]}; do
+            for BETA in ${BETA_LIST[@]}; do
             
-            # Define Job Name and Output File
-            JOBN="rat"$RAT"_seed"$SEED"_alpha"$ALPHA
-            OUT_FILE=$OUT_DIR"/rat"$RAT"_seed"$SEED"_alpha"$ALPHA".csv"
-            
-            COMPLETE=0
-            if [[ -f $OUT_FILE ]]; then
-                COMPLETE=1
-                ((comp++))
-            fi
+                # Define Job Name and Output File (Added BETA)
+                JOBN="rat"$RAT"_seed"$SEED"_alpha"$ALPHA"_beta"$BETA
+                OUT_FILE=$OUT_DIR"/rat"$RAT"_seed"$SEED"_alpha"$ALPHA"_beta"$BETA".csv"
+                
+                COMPLETE=0
+                if [[ -f $OUT_FILE ]]; then
+                    COMPLETE=1
+                    ((comp++))
+                fi
 
-            if [[ $COMPLETE -eq 0 ]]; then
-                ((incomp++))
-                
-                # Script arguments: <seed> <rat_id> <alpha>
-                SCRIPT="exp_rat.sh $SEED $RAT $ALPHA"
-                
-                # Log files
-                OUTF=$LOGS"/"$JOBN".out"
-                ERRF=$LOGS"/"$JOBN".err"
-                
-                # Assemble order
-                ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
-                
-                # Print and Submit
-                echo $ORD
-                $ORD
-            fi
+                if [[ $COMPLETE -eq 0 ]]; then
+                    ((incomp++))
+                    
+                    # Script arguments: <seed> <rat_id> <alpha> <beta>
+                    SCRIPT="exp_rat.sh $SEED $RAT $ALPHA $BETA"
+                    
+                    # Log files
+                    OUTF=$LOGS"/"$JOBN".out"
+                    ERRF=$LOGS"/"$JOBN".err"
+                    
+                    # Assemble order
+                    ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
+                    
+                    # Print and Submit
+                    echo $ORD
+                    $ORD
+                fi
+            done
         done
     done
 done
