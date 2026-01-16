@@ -6,10 +6,10 @@
 # ALPHA_LIST=(0.2)
 
 # --- FULL EXPERIMENT LIST ---
-SEED_LIST=(1)
+SEED_LIST=(1 2)
 RAT_LIST=$(seq 0 4)      
 ALPHA_LIST=(0.2) 
-BETA_LIST=(0.1 0.2 0.3)
+BETA_LIST=(0.2)
 
 # Slurm parameters (CPU Only)
 EXPNAME="odor_decoding"
