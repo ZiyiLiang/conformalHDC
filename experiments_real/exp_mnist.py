@@ -81,7 +81,7 @@ def get_hvs_labels(loader, pos_hvs):
 
 ################======== Experiment Logic ========################
 
-def run_single_experiment(random_state):
+def run_single_experiment(random_state, alpha):
     # Reproducibility
     np.random.seed(random_state)
     torch.manual_seed(random_state)

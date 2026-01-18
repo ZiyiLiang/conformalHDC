@@ -32,7 +32,7 @@ for SEED in ${SEED_LIST[@]}; do
     for ALPHA in ${ALPHA_LIST[@]}; do
     
         # Define Job Name and Output File (Matches format in exp_mnist.py)
-        JOBN="mnist_seed"$SEED"_alpha"$ALPHA
+        JOBN="seed"$SEED"_alpha"$ALPHA
         OUT_FILE=$OUT_DIR"/seed"$SEED"_alpha"$ALPHA".csv"
         
         COMPLETE=0
