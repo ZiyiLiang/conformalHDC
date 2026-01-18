@@ -151,9 +151,9 @@ def run_single_experiment(random_state, alpha):
         
         # 1. Set-Valued Prediction
         for marginal in [True, False]:
-            psets = chdc.set_valued_CP(test_hvs, ALPHA, marginal=marginal)
-            sizes = [len(p) for p in psets]
-            covered = [1 if y in p else 0 for y, p in zip(test_y, psets)]
+            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            sizes = [len(p) for p in sets]
+            covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
             
             # Label conditional coverage
             lc_covs = []
@@ -174,7 +174,7 @@ def run_single_experiment(random_state, alpha):
                 # Placeholders
                 "point_acc": np.nan, "ood_auroc": np.nan, "method": np.nan
             })
-
+            
         # 2. Point-Valued Prediction
         for method in ["accurate", "efficient"]:
             preds_pt = chdc.point_valued_CP(test_hvs, method=method)
