@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
-ALPHA_LIST=(0.1)
+# SEED_LIST=(1)
+# ALPHA_LIST=(0.1)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=(1 2)
-# ALPHA_LIST=(0.1)
+SEED_LIST=(1 2 3 4)
+ALPHA_LIST=(0.1)
 
 EXPNAME="mnist"
 

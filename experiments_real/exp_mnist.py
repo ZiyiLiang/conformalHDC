@@ -22,7 +22,7 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "mnist"
-REPETITIONS = 2
+REPETITIONS = 50
 DIM = 10_000
 BATCH_SIZE = 512
 LABELS_ID = [0, 2, 3, 5, 6, 8]
