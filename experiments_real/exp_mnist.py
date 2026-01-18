@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from pathlib import Path
 from torch.utils.data import DataLoader, Subset, ConcatDataset, random_split
 from torchvision import datasets, transforms
 from sklearn.metrics import roc_auc_score, roc_curve
@@ -12,46 +13,21 @@ from sklearn.metrics import roc_auc_score, roc_curve
 # --- Library Imports ---
 sys.path.append('../') 
 try:
-    # Attempting wildcard imports as per notebook, though explicit is usually safer
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
 except ImportError:
-    # Fallback if specific modules aren't found directly (e.g. running standalone)
-    try:
-        from conformalHDC.models import ConformalHDC
-        from conformalHDC.utils import eval_accuracy
-    except ImportError:
-        print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
+    print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 
-#########################
-# Experiment parameters #
-#########################
-if True:
-    # Parse input arguments
-    print('Number of arguments:', len(sys.argv), 'arguments.')
-    print('Argument List:', str(sys.argv))
-    if len(sys.argv) != 2:
-        print("Error: incorrect number of parameters. Usage: python exp_mnist.py <seed_group_id>")
-        sys.exit(1)
 
-    seed_group_id = int(sys.argv[1])
-
-# Fixed parameters
+# Fixed Constants
 EXP_NAME = "mnist"
-REPETITIONS = 100  # Number of runs per job
+REPETITIONS = 2
 DIM = 10_000
 BATCH_SIZE = 512
 LABELS_ID = [0, 2, 3, 5, 6, 8]
 LABELS_OOD = [1, 4, 7, 9]
-ALPHA = 0.1
-# Using all score types as requested in original prompt, despite notebook testing only one
 SCORE_TYPES = ["sim", "ratio", "discount", "penalized", "inverse_quantile"]
-
-# Directory Setup
-OUT_DIR = f"./results/{EXP_NAME}"
-os.makedirs(OUT_DIR, exist_ok=True)
-outfile = os.path.join(OUT_DIR, f"seed{seed_group_id}.csv")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -102,6 +78,7 @@ def get_hvs_labels(loader, pos_hvs):
         all_labels.append(labels.numpy())
     return np.concatenate(all_hvs), np.concatenate(all_labels)
 
+
 ################======== Experiment Logic ========################
 
 def run_single_experiment(random_state):
@@ -111,7 +88,7 @@ def run_single_experiment(random_state):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(random_state)
     
-    # 1. Data Prep & Splitting
+    # Data Prep & Splitting
     transform = transforms.ToTensor()
     ds_full = ConcatDataset([
         datasets.MNIST(root='./data', train=True, transform=transform, download=True),
@@ -126,7 +103,7 @@ def run_single_experiment(random_state):
     ds_id = Subset(ds_full, id_idx)
     ds_ood = Subset(ds_full, ood_idx)
     
-    # Split ID: 80% Train, 15% Calib, ~5% Test (Updated as per notebook)
+    # Split in-distribution (IDs): 80% Train, 15% Calib, 5% Test
     n_total = len(ds_id)
     n_train = int(0.8 * n_total)
     n_calib = int(0.15 * n_total)
@@ -143,24 +120,24 @@ def run_single_experiment(random_state):
     ld_test = DataLoader(ds_test, batch_size=BATCH_SIZE, shuffle=False)
     ld_ood = DataLoader(ds_ood, batch_size=BATCH_SIZE, shuffle=False)
     
-    # 2. HDC Init
+    # HDC Init
     pos_hvs = make_position_hvs(28*28, DIM, device=DEVICE)
     
-    # 3. Train Models
-    # A. Conformal Model (Train only)
+    # Train Models
+    # Conformal Model (Train only)
     protos_conf = build_prototypes(ld_train, pos_hvs, LABELS_ID)
     
-    # B. Vanilla Baseline (Train + Calib)
+    # Vanilla Baseline (Train + Calib)
     ds_vanilla = ConcatDataset([ds_train, ds_calib])
     ld_vanilla = DataLoader(ds_vanilla, batch_size=BATCH_SIZE, shuffle=True)
     protos_vanilla = build_prototypes(ld_vanilla, pos_hvs, LABELS_ID)
     
-    # 4. Pre-compute HVs for inference speed
+    # Pre-compute HVs
     calib_hvs, calib_y = get_hvs_labels(ld_calib, pos_hvs)
     test_hvs, test_y = get_hvs_labels(ld_test, pos_hvs)
     ood_hvs, ood_y = get_hvs_labels(ld_ood, pos_hvs)
     
-    # Balance OOD to match Test size (Updated as per notebook)
+    # Balance OOD to match Test size 
     min_len = min(len(ood_hvs), len(test_hvs))
     ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
     
@@ -172,7 +149,7 @@ def run_single_experiment(random_state):
     for stype in SCORE_TYPES:
         chdc.compute_calib_scores(calib_hvs, calib_y, score_type=stype)
         
-        # [Exp 1] Set-Valued Coverage & Width
+        # 1. Set-Valued Prediction
         for marginal in [True, False]:
             psets = chdc.set_valued_CP(test_hvs, ALPHA, marginal=marginal)
             sizes = [len(p) for p in psets]
@@ -189,99 +166,114 @@ def run_single_experiment(random_state):
                 "exp": "set_valued",
                 "random_state": random_state,
                 "score_type": stype,
+                "alpha": alpha,
                 "marginal": marginal,
-                "avg_size": np.mean(sizes),
-                "marginal_cov": np.mean(covered),
+                "set_cov": np.mean(covered),
+                "set_size": np.mean(sizes),
                 "min_class_cov": np.min(lc_covs) if lc_covs else 0.0,
                 # Placeholders
-                "accuracy": np.nan, "auroc": np.nan, "fpr95": np.nan, "method": np.nan
+                "point_acc": np.nan, "ood_auroc": np.nan, "method": np.nan
             })
 
-        # [Exp 2] Point-Valued Accuracy (Conformal)
-        # Updated to include "efficient" as per notebook
+        # 2. Point-Valued Prediction
         for method in ["accurate", "efficient"]:
-            preds = chdc.point_valued_CP(test_hvs, method=method)
-            acc = eval_accuracy(preds, test_y)
+            preds_pt = chdc.point_valued_CP(test_hvs, method=method)
+            acc_pt = eval_accuracy(preds_pt, test_y)
+
             exp_results.append({
-                "exp": "accuracy",
+                "exp": "point_valued",
                 "random_state": random_state,
                 "score_type": stype,
-                "method": f"cp_{method}",
-                "accuracy": acc,
+                "alpha": alpha,
+                "method": method,
+                "point_acc": acc_pt,
                 # Placeholders
-                "marginal": np.nan, "avg_size": np.nan, "marginal_cov": np.nan, 
-                "min_class_cov": np.nan, "auroc": np.nan, "fpr95": np.nan
+                "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+                "min_class_cov": np.nan, "ood_auroc": np.nan
             })
 
-        # [Exp 3] OOD Detection
+        # 3. OOD Detection
         for marginal in [True, False]:
-            in_scores = chdc.get_max_p_value(test_hvs, marginal=marginal)
-            out_scores = chdc.get_max_p_value(ood_hvs, marginal=marginal)
+            p_vals_id = chdc.get_max_p_value(test_hvs, marginal=marginal)
+            p_vals_ood = chdc.get_max_p_value(ood_hvs, marginal=marginal)
             
-            # Eval
-            y_true = np.concatenate([np.ones(len(in_scores)), np.zeros(len(out_scores))]) # ID=1, OOD=0
-            y_scores = np.concatenate([in_scores, out_scores])
+            y_true_roc = np.concatenate([np.ones(len(p_vals_id)), np.zeros(len(p_vals_ood))])
+            y_scores_roc = np.concatenate([p_vals_id, p_vals_ood])
             
-            auroc = roc_auc_score(y_true, y_scores)
-            
-            # FPR95
-            fpr, tpr, _ = roc_curve(1 - y_true, 1 - y_scores)
-            idx = np.argmin(np.abs(tpr - 0.95))
-            fpr95 = fpr[idx]
+            ood_auroc = roc_auc_score(y_true_roc, y_scores_roc)
             
             exp_results.append({
                 "exp": "ood",
                 "random_state": random_state,
                 "score_type": stype,
+                "alpha": alpha,
                 "marginal": marginal,
-                "auroc": auroc,
-                "fpr95": fpr95,
+                "ood_auroc": ood_auroc,
                 # Placeholders
-                "accuracy": np.nan, "avg_size": np.nan, "marginal_cov": np.nan, 
+                "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
                 "min_class_cov": np.nan, "method": np.nan
             })
+    print("Finished running conformaHDC.")
+    sys.stdout.flush()
 
-    # [Exp 2b] Vanilla Baseline (Computed once per seed, outside score loop)
+    # Baseline Vanilla HDC (Once per seed)
     sims = cosine_sim(torch.tensor(test_hvs, device=DEVICE), protos_vanilla)
     preds_vanilla_idx = sims.argmax(dim=1).cpu().numpy()
     preds_vanilla = np.array([LABELS_ID[i] for i in preds_vanilla_idx])
     acc_vanilla = np.mean(preds_vanilla == test_y)
     
     exp_results.append({
-        "exp": "accuracy",
+        "exp": "point_valued",
         "random_state": random_state,
         "score_type": "cosine",
-        "method": "vanilla_hdc",
-        "accuracy": acc_vanilla,
+        "alpha": np.nan,
+        "method": "vanilla",
+        "point_acc": acc_vanilla,
         # Placeholders
-        "marginal": np.nan, "avg_size": np.nan, "marginal_cov": np.nan, 
-        "min_class_cov": np.nan, "auroc": np.nan, "fpr95": np.nan
+        "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+        "min_class_cov": np.nan, "ood_auroc": np.nan
     })
+    print("Finished running vanilla HDC.")
+    sys.stdout.flush()
 
     return pd.DataFrame(exp_results)
 
-#####################
-#  Run Experiments  #
-#####################
-results_list = []
 
-print(f"Starting job with seed_group_id {seed_group_id}, running {REPETITIONS} repetitions.")
 
-for i in tqdm(range(1, REPETITIONS + 1), desc="Repetitions"):
-    # Generate unique seed based on group ID and repetition index
-    current_seed = REPETITIONS * (seed_group_id - 1) + i
+# ---------------
+# Main Execution
+# ---------------
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python exp_mnist.py <seed_group_id> <alpha>")
+        sys.exit(1)
+
+    seed_arg = int(sys.argv[1])
+    alpha_arg = float(sys.argv[2])
+
+    # Directory Setup
+    out_dir = Path(f"./results/{EXP_NAME}")
+    out_dir.mkdir(parents=True, exist_ok=True)
     
-    try:
-        df_rep = run_single_experiment(current_seed)
-        df_rep['seed_group'] = seed_group_id
-        results_list.append(df_rep)
-    except Exception as e:
-        print(f"Error in seed {current_seed}: {e}")
-        # Optional: raise e if you want to stop the job on error
+    outfile = out_dir / f"seed{seed_arg}_alpha{alpha_arg}.csv"
 
-if results_list:
-    final_df = pd.concat(results_list, ignore_index=True)
-    final_df.to_csv(outfile, index=False)
-    print(f"\nResults saved to {outfile}")
-else:
-    print("No results generated.")
+    print(f"Starting job: Seed Group {seed_arg}, Alpha {alpha_arg}, Reps {REPETITIONS}")
+
+    results_list = []
+
+    for i in tqdm(range(1, REPETITIONS + 1), desc="Repetitions"):
+        # Generate unique seed based on group ID and repetition index
+        current_state = REPETITIONS * (seed_arg - 1) + i
+        
+        try:
+            df_rep = run_single_experiment(current_state, alpha_arg)
+            results_list.append(df_rep)
+        except Exception as e:
+            print(f"Error in state {current_state}: {e}")
+
+    if results_list:
+        final_df = pd.concat(results_list, ignore_index=True)
+        final_df.to_csv(outfile, index=False)
+        print(f"\nResults saved to {outfile}")
+    else:
+        print("No results generated.")
