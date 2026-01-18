@@ -6,7 +6,7 @@
 # ALPHA_LIST=(0.2)
 
 # --- FULL EXPERIMENT LIST ---
-SEED_LIST=(1 2)
+SEED_LIST=(1 2 3 4 5)
 RAT_LIST=$(seq 0 4)      
 ALPHA_LIST=(0.2) 
 BETA_LIST=(0.2)
