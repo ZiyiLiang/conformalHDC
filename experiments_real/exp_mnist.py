@@ -141,8 +141,8 @@ def run_single_experiment(random_state, alpha):
     min_len = min(len(ood_hvs), len(test_hvs))
     ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
     
-    chdc_sets = ConformalHDC(protos_train.cpu().numpy(), LABELS_ID) # Used for Sets & OOD
-    chdc_point = ConformalHDC(protos_full.cpu().numpy(), LABELS_ID) # Used for Point predictions
+    chdc_sets = ConformalHDC(protos_train.cpu().numpy(), LABELS_ID, sim_measure="cosine", random_state=random_state) # Used for Sets & OOD
+    chdc_point = ConformalHDC(protos_full.cpu().numpy(), LABELS_ID, sim_measure="cosine", random_state=random_state) # Used for Point predictions
     
     exp_results = []
     

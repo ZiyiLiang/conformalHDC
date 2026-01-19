@@ -179,13 +179,12 @@ def run_single_experiment(random_state, alpha):
     full_hvs = np.concatenate([train_hvs, cal_hvs])
     full_y = np.concatenate([train_y, cal_y])
     protos_full = build_prototypes_np(full_hvs, full_y, ID_CLASSES, DIM)
-
     print("Prototypes built.")
     sys.stdout.flush()
 
     # Initialize Models
-    chdc_sets = ConformalHDC(protos_train, ID_CLASSES) # Used for Sets & OOD (needs calibration)
-    chdc_point = ConformalHDC(protos_full, ID_CLASSES) # Used for Point predictions
+    chdc_sets = ConformalHDC(protos_train, ID_CLASSES, sim_measure="cosine", random_state=random_state) # Used for Sets & OOD (needs calibration)
+    chdc_point = ConformalHDC(protos_full, ID_CLASSES, sim_measure="cosine", random_state=random_state) # Used for Point predictions
     
     exp_results = []
     
