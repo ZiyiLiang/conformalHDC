@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # --- EXPERIMENT LIST ---
-SEED_LIST=(1 2)
-ALPHA_LIST=(0.1)
+SEED_LIST=(1 2 3 4 5)
+ALPHA_LIST=(0.05)
 
 # Slurm parameters
 EXPNAME="isolet"
