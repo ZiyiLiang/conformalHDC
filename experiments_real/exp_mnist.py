@@ -148,7 +148,7 @@ def run_single_experiment(random_state, alpha):
     
     # --- Experiment Loop per Score Type ---
     for stype in SCORE_TYPES:
-        chdc.compute_calib_scores(calib_hvs, calib_y, score_type=stype)
+        chdc_sets.compute_calib_scores(calib_hvs, calib_y, score_type=stype)
         
         # 1. Set-Valued Prediction (Using calibrated model)
         for marginal in [True, False]:

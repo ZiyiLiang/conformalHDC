@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- EXPERIMENT LIST ---
-SEED_LIST=(1 2 3 4 5)
+SEED_LIST=($(seq 1 5))
 ALPHA_LIST=(0.05)
 
 # Slurm parameters

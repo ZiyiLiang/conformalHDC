@@ -23,7 +23,7 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "isolet"
-REPETITIONS = 40
+REPETITIONS = 20
 DIM = 10_000
 LEVELS = 21
 BATCH_SIZE = 512
