@@ -12,7 +12,7 @@ EXPNAME="mnist"
 
 # Slurm parameters
 MEMO=8G                             
-TIME=00-02:00:00                    
+TIME=00-04:00:00                    
 CORE=1                              
 
 # Assemble order
