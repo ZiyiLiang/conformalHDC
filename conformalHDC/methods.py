@@ -281,8 +281,9 @@ class ConformalHDC():
         HV2s = np.atleast_2d(HV2s)
 
         if self.sim_measure == "euclidean":
-            sims = -np.linalg.norm(HV1s - HV2s, axis=1)
-        
+            #sims = -np.linalg.norm(HV1s - HV2s, axis=1)
+            sims = 1/np.linalg.norm(HV1s - HV2s, axis=1)
+
         elif self.sim_measure == "cosine":
             dot_products = (HV1s * HV2s).sum(axis=1)
             an = np.linalg.norm(HV1s, axis=1)
@@ -321,8 +322,12 @@ class ConformalHDC():
 
             if score_type == "discount":
                 score = -(sim_true_class/sim_all_classes)*(sim_true_class)
+            elif score_type == "alt_discount":
+                score = -(sim_true_class/(sim_all_classes-sim_true_class))*(sim_true_class)
             elif score_type == "ratio":
                 score = -sim_true_class/sim_all_classes
+            elif score_type == "alt_ratio":
+                score = -sim_true_class/(sim_all_classes-sim_true_class)
             elif score_type == "sim":
                 score = -sim_true_class
             elif score_type == "penalized":
@@ -345,7 +350,9 @@ class ConformalHDC():
                 
                 # randomize to get exact coverage
                 U = rng.uniform(0, 1)
-                score = - cumulative_prob + U * pi_true 
+                score = - cumulative_prob + U * pi_true
+            else:
+                 print("Unknown score type!")
             scores[i] = score 
             
         return scores
@@ -389,16 +396,51 @@ class ConformalHDC():
         return psets
 
 
-    def point_valued_CP(self, test_HVs, score_type, **kwargs):
-        ''' Computes point-valued predictions (Algorithms 3 & 4).
-            [TODO] add the point-valued CP with empty output constructed from the set-valued CP
+    # def point_valued_CP(self, test_HVs, score_type, **kwargs):
+    #     ''' Computes point-valued predictions (Algorithms 3 & 4).
+    #         [TODO] add the point-valued CP with empty output constructed from the set-valued CP
 
+    #         Args:
+    #             test_HVs: Input hypervectors
+    #             score_type: type of nonconformity scores 
+    #     '''
+    #     n_test = len(test_HVs)
+    #     n_classes = len(self.canonical_indices)
+
+    #     # Compute Nonconformity Scores for ALL classes for ALL test points
+    #     all_scores = np.zeros((n_test, n_classes))
+        
+    #     for c_idx in self.canonical_indices:
+    #         # Calculate scores as if the test points belonged to class c_idx
+    #         scores_c = self._compute_nonconformity_scores(
+    #             test_HVs, [c_idx]*n_test, score_type=score_type, **kwargs
+    #         )
+    #         all_scores[:, c_idx] = scores_c
+
+    #     # Select the class that yields the lowest nonconformity score 
+    #     best_canonical_indices = np.argmin(all_scores, axis=1)
+
+    #     predictions = [self.class_labels[idx] for idx in best_canonical_indices]
+        
+    #     return np.array(predictions)
+
+    def point_valued_CP(self, test_HVs, method='accurate', **kwargs):
+        ''' Computes point-valued predictions (Algorithms 3 & 4).
+            
             Args:
                 test_HVs: Input hypervectors
-                score_type: type of nonconformity scores 
+                method: 
+                    If "accurate": Returns the accuracy-firt prediction.
+                    If "efficient": Returns the efficiency-first prediction.
         '''
         n_test = len(test_HVs)
         n_classes = len(self.canonical_indices)
+        
+        # Check if calibration scores are computed
+        required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
+        if not all(hasattr(self, attr) for attr in required_attrs):
+            print("Compute calibration scores first! (Call function compute_calib_scores)")
+            return 
 
         # Compute Nonconformity Scores for ALL classes for ALL test points
         all_scores = np.zeros((n_test, n_classes))
@@ -406,15 +448,41 @@ class ConformalHDC():
         for c_idx in self.canonical_indices:
             # Calculate scores as if the test points belonged to class c_idx
             scores_c = self._compute_nonconformity_scores(
-                test_HVs, [c_idx]*n_test, score_type=score_type, **kwargs
+                test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
             )
             all_scores[:, c_idx] = scores_c
 
-        # Select the class that yields the lowest nonconformity score 
-        best_canonical_indices = np.argmin(all_scores, axis=1)
+        if method == "efficient":
+            # Select the class that yields the lowest nonconformity score 
+            best_canonical_indices = np.argmin(all_scores, axis=1)
+
+        elif method == "accurate":
+            # Select the class where the test point has the highest p-value.
+            p_values = np.zeros((n_test, n_classes))
+
+            for c_idx in self.canonical_indices:
+                # Get calibration scores for this specific class
+                calib_c = np.sort(self.calib_scores_per_label[c_idx])
+                n_calib = len(calib_c)
+                
+                if n_calib == 0:
+                    p_values[:, c_idx] = 0.0 # Avoid div by zero / invalid class
+                    continue
+                
+                test_scores_c = all_scores[:, c_idx]
+                ranks = np.searchsorted(calib_c, test_scores_c, side='left')
+                
+                # Calculate p-value (higher is better/more conformal)
+                p_values[:, c_idx] = (n_calib - ranks + 1) / (n_calib + 1)
+            
+            # Select class with the highest p-value
+            best_canonical_indices = np.argmax(p_values, axis=1)
+        
+        else: 
+            print('Unknown prediction method, choose between "accurate" or "efficient".')
+            return 
 
         predictions = [self.class_labels[idx] for idx in best_canonical_indices]
-        
         return np.array(predictions)
 
 
