@@ -22,11 +22,11 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "mnist"
-REPETITIONS = 1
+REPETITIONS = 20
 DIM = 10_000
 BATCH_SIZE = 512
-LABELS_ID = [0, 2, 3, 5, 6, 8]
-LABELS_OOD = [1, 4, 7, 9]
+LABELS_ID = [0, 1, 2, 3, 4, 5]
+LABELS_OOD = [6, 7, 8, 9]
 SCORE_TYPES = ["sim", "ratio", "discount", "penalized", "inverse_quantile"]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -90,13 +90,28 @@ def run_single_experiment(random_state, alpha):
     
     # Data Prep & Splitting
     transform = transforms.ToTensor()
-    ds_full = ConcatDataset([
+    raw_ds = ConcatDataset([
         datasets.MNIST(root='./data', train=True, transform=transform, download=True),
         datasets.MNIST(root='./data', train=False, transform=transform, download=True)
     ])
     
-    # Extract labels to filter
-    targets = np.concatenate([d.targets.numpy() for d in ds_full.datasets])
+    # Count labels
+    all_targets = np.concatenate([d.targets.numpy() for d in raw_ds.datasets])
+    unique_labels = np.unique(all_targets)    
+    class_indices = [np.where(all_targets == i)[0] for i in unique_labels]
+    min_count = min(len(idxs) for idxs in class_indices)
+    
+    # Subsample indices to ensure label balance
+    balanced_indices = []
+    rng = np.random.RandomState(random_state) 
+    for idxs in class_indices:
+        selected_idxs = rng.choice(idxs, min_count, replace=False)
+        balanced_indices.extend(selected_idxs)
+        
+    ds_full = Subset(raw_ds, balanced_indices)
+    targets = all_targets[balanced_indices]
+
+    # Filter OOD samples
     id_idx = np.where(np.isin(targets, LABELS_ID))[0]
     ood_idx = np.where(np.isin(targets, LABELS_OOD))[0]
     
