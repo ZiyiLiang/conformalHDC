@@ -244,7 +244,7 @@ def run_single_experiment(random_state, alpha):
         "exp": "point_valued",
         "random_state": random_state,
         "score_type": "vanilla_train",
-        "alpha": np.nan,
+        "alpha": alpha,
         "point_acc": acc_vanilla, 
         "lc_accs": lc_accs,
         # Placeholders
@@ -261,7 +261,7 @@ def run_single_experiment(random_state, alpha):
         "exp": "point_valued",
         "random_state": random_state,
         "score_type": "vanilla_full",
-        "alpha": np.nan,
+        "alpha": alpha,
         "point_acc": acc_vanilla, 
         "lc_accs": lc_accs,
         # Placeholders

@@ -235,7 +235,7 @@ for (r in rats_to_process) {
 #-------------------------------------------------------------------------------
 # Set your results directory here
 setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
-results_dir <- "./mnist/" 
+results_dir <- "./mnist_0.05/" 
 
 # Pattern matches: seedX_alphaY.csv or similar
 files <- list.files(path = results_dir, pattern = "*.csv", 
@@ -424,7 +424,8 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL, plot_condition
   }
 }
 
-create_mnist_table(full_data, target_alpha = 0.1, plot_conditional = FALSE)
+create_mnist_table(full_data, target_alpha = 0.05, plot_conditional = FALSE)
+
 
 df_pt <- full_data %>% 
   filter(exp == "point_valued")
