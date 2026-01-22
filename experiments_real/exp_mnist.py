@@ -131,12 +131,16 @@ def run_single_experiment(random_state, alpha):
     ds_full_id = ConcatDataset([ds_train, ds_calib])
     ld_full = DataLoader(ds_full_id, batch_size=BATCH_SIZE, shuffle=True)
     protos_full = build_prototypes(ld_full, pos_hvs, LABELS_ID)
-    
+    print("Prototypes built.")
+    sys.stdout.flush()
+
     # Pre-compute HVs
     calib_hvs, calib_y = get_hvs_labels(ld_calib, pos_hvs)
     test_hvs, test_y = get_hvs_labels(ld_test, pos_hvs)
     ood_hvs, ood_y = get_hvs_labels(ld_ood, pos_hvs)
-    
+    print("Encoding complete.")
+    sys.stdout.flush()
+
     # Balance OOD to match Test size 
     min_len = min(len(ood_hvs), len(test_hvs))
     ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
@@ -211,9 +215,11 @@ def run_single_experiment(random_state, alpha):
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
                 "lc_covs": np.nan
             })
+    print("Finished running ConformalHDC.")
+    sys.stdout.flush()
 
     # Baseline Vanilla HDC (Once per seed)
-    preds_vanilla = chdc_point.predict(test_hvs)
+    preds_vanilla = chdc.predict(test_hvs)
     acc_vanilla = eval_accuracy(preds_vanilla, test_y)
     
     exp_results.append({
@@ -251,11 +257,14 @@ if __name__ == "__main__":
     outfile = out_dir / f"seed{seed_arg}_alpha{alpha_arg}.csv"
 
     print(f"Starting job: Seed Group {seed_arg}, Alpha {alpha_arg}, Reps {REPETITIONS}")
+    sys.stdout.flush()
 
     results_list = []
 
     for i in tqdm(range(1, REPETITIONS + 1), desc="Repetitions"):
         # Generate unique seed based on group ID and repetition index
+        print(f"Running repetition {i}...")
+        sys.stdout.flush()
         current_state = REPETITIONS * (seed_arg - 1) + i
         
         try:
@@ -263,10 +272,13 @@ if __name__ == "__main__":
             results_list.append(df_rep)
         except Exception as e:
             print(f"Error in state {current_state}: {e}")
+            sys.stdout.flush()
 
     if results_list:
         final_df = pd.concat(results_list, ignore_index=True)
         final_df.to_csv(outfile, index=False)
         print(f"\nResults saved to {outfile}")
+        sys.stdout.flush()
     else:
         print("No results generated.")
+        sys.stdout.flush()
