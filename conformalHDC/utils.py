@@ -54,3 +54,38 @@ def eval_accuracy(y_pred, y_true):
         raise ValueError(f"Shape mismatch: preds {len(y_pred)} vs true {len(y_true)}")
         
     return np.mean(y_pred == y_true)
+
+
+def eval_lc_accuracy(y_pred, y_true, labels_id):
+    ''' Computes label-conditional accuracy (accuracy per class).
+    
+        Args:
+            y_pred: Array-like of predicted labels.
+            y_true: Array-like of ground truth labels.
+            labels_id: List of label IDs to evaluate (e.g., [0, 1, 2]).
+            
+        Returns:
+            List of float accuracy scores corresponding to the order of labels_id.
+            Returns np.nan for classes with no samples in y_true.
+    '''
+    y_pred = np.array(y_pred)
+    y_true = np.array(y_true)
+    
+    if len(y_pred) != len(y_true):
+        raise ValueError(f"Shape mismatch: preds {len(y_pred)} vs true {len(y_true)}")
+        
+    accuracies = []
+    
+    for label in labels_id:
+        # Mask where the ground truth is the current class
+        mask = (y_true == label)
+        
+        if np.sum(mask) == 0:
+            # Avoid division by zero if class is missing from test set
+            accuracies.append(np.nan) 
+        else:
+            # Compute accuracy only on this subset
+            acc = np.mean(y_pred[mask] == y_true[mask])
+            accuracies.append(acc)
+            
+    return accuracies

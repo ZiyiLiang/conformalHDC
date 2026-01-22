@@ -22,7 +22,7 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "mnist"
-REPETITIONS = 2
+REPETITIONS = 1
 DIM = 10_000
 BATCH_SIZE = 512
 LABELS_ID = [0, 2, 3, 5, 6, 8]
@@ -145,7 +145,7 @@ def run_single_experiment(random_state, alpha):
     min_len = min(len(ood_hvs), len(test_hvs))
     ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
     
-    chdc = ConformalHDC(protos_train.cpu().numpy(), LABELS_ID, sim_measure="cosine", random_state=random_state) # Used for Sets & OOD
+    chdc = ConformalHDC(protos_train.cpu().numpy(), LABELS_ID, sim_measure="cosine", random_state=random_state) 
     
     exp_results = []
     
@@ -176,19 +176,21 @@ def run_single_experiment(random_state, alpha):
                 "set_size": np.mean(sizes),
                 "lc_covs": lc_covs if lc_covs else 0.0,
                 # Placeholders
-                "point_acc": np.nan, "ood_auroc": np.nan
+                "point_acc": np.nan, "lc_accs":np.nan, "ood_auroc": np.nan
             })
             
         # 2. Point-Valued Prediction
         preds_pt = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
-        acc_pt = eval_accuracy(preds_pt, np.array(preds_pt).ravel())
+        acc_pt = eval_accuracy(np.array(preds_pt).ravel(), test_y)
+        lc_accs = eval_lc_accuracy(preds_pt, test_y, LABELS_ID)
 
         exp_results.append({
             "exp": "point_valued",
             "random_state": random_state,
             "score_type": stype,
             "alpha": alpha,
-            "point_acc": acc_pt, 
+            "point_acc": acc_pt,
+            "lc_accs": lc_accs,
             # Placeholders
             "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
             "lc_covs": np.nan, "ood_auroc": np.nan
@@ -213,7 +215,7 @@ def run_single_experiment(random_state, alpha):
                 "ood_auroc": ood_auroc,
                 # Placeholders
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
-                "lc_covs": np.nan
+                "lc_covs": np.nan, "lc_accs":np.nan
             })
     print("Finished running ConformalHDC.")
     sys.stdout.flush()
@@ -221,17 +223,37 @@ def run_single_experiment(random_state, alpha):
     # Baseline Vanilla HDC (Once per seed)
     preds_vanilla = chdc.predict(test_hvs)
     acc_vanilla = eval_accuracy(preds_vanilla, test_y)
+    lc_accs = eval_lc_accuracy(preds_vanilla, test_y, LABELS_ID)
     
     exp_results.append({
         "exp": "point_valued",
         "random_state": random_state,
-        "score_type": "vanilla",
+        "score_type": "vanilla_train",
         "alpha": np.nan,
         "point_acc": acc_vanilla, 
+        "lc_accs": lc_accs,
         # Placeholders
         "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
         "lc_covs": np.nan, "ood_auroc": np.nan
     })
+
+    chdc_full = ConformalHDC(protos_full.cpu().numpy(), LABELS_ID, sim_measure="cosine", random_state=random_state)
+    preds_vanilla = chdc_full.predict(test_hvs)
+    acc_vanilla = eval_accuracy(preds_vanilla, test_y)
+    lc_accs = eval_lc_accuracy(preds_vanilla, test_y, LABELS_ID)
+    
+    exp_results.append({
+        "exp": "point_valued",
+        "random_state": random_state,
+        "score_type": "vanilla_full",
+        "alpha": np.nan,
+        "point_acc": acc_vanilla, 
+        "lc_accs": lc_accs,
+        # Placeholders
+        "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+        "lc_covs": np.nan, "ood_auroc": np.nan
+    })
+    
     print("Finished running vanilla HDC.")
     sys.stdout.flush()
 
