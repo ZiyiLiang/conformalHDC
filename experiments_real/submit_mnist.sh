@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-# SEED_LIST=(1)
-# ALPHA_LIST=(0.1)
+SEED_LIST=(1)
+ALPHA_LIST=(0.1)
 
 # --- FULL EXPERIMENT LIST ---
-SEED_LIST=(1 2 3 4)
-ALPHA_LIST=(0.1)
+# SEED_LIST=(1 2 3 4 5)
+# ALPHA_LIST=(0.1)
 
 EXPNAME="mnist"
 
 # Slurm parameters
 MEMO=8G                             
-TIME=00-04:00:00                    
+TIME=00-02:00:00                    
 CORE=1                              
 
 # Assemble order

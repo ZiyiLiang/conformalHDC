@@ -388,10 +388,10 @@ class ConformalHDC():
                     real_label = self.class_labels[c_idx]
                     psets[i].append(real_label)
             
-            if not allow_empty:
-                for i, pset in enumerate(psets):
-                    if len(pset)==0:
-                        pset.append(self.point_valued_CP(inputs_test[i]))
+        if not allow_empty:
+            for i, pset in enumerate(psets):
+                if len(pset)==0:
+                    pset.append(self.predict(test_HVs[i]))
 
         return psets
 
@@ -424,7 +424,54 @@ class ConformalHDC():
         
     #     return np.array(predictions)
 
-    def point_valued_CP(self, test_HVs, method='accurate', **kwargs):
+    def point_valued_CP(self, test_HVs, alpha, 
+                    allow_empty=True,
+                    marginal=False, **kwargs):
+        ''' Trim the conformal prediction sets at significance level alpha to produce point prediction.
+            
+            Args:
+                test_HVs: Input hypervectors
+                alpha: significance level of the conformal psets
+                allow_empty: If False, the point predictor will use vanilla HDC prediction when the
+                    conformal pset is empty
+                marginal: If True, compute marginal psets, otherwise, compute label-conditional psets
+        '''
+
+        n_test = len(test_HVs)
+        psets = [[] for _ in range(n_test)]
+
+        # check if calibration scores are computed
+        required_attrs = ['calib_scores', 'calib_scores_per_label', 'score_type']
+        if not all(hasattr(self, attr) for attr in required_attrs):
+            print("Compute calibration scores first! (Call function compute_calib_scores)")
+            return 
+        
+        if marginal: 
+            self.quantile = np.quantile(self.calib_scores, (self.n_calib+1)*(1-alpha)/self.n_calib)
+        else:
+            self.quantiles = [np.quantile(scores, (n+1)*(1-alpha)/n) for scores, n in zip(self.calib_scores_per_label, self.n_calib_per_label)]
+        
+        for c_idx in self.canonical_indices:
+            test_scores = self._compute_nonconformity_scores(
+                test_HVs, [c_idx]*n_test, score_type=self.score_type, **kwargs
+            )
+            for i in range(n_test):
+                q = self.quantile if marginal else self.quantiles[c_idx]
+                if test_scores[i] <= q:
+                    real_label = self.class_labels[c_idx]
+                    psets[i].append(real_label)
+        
+        # Trim the psets to get point prediction
+        for i, pset in enumerate(psets):
+            if len(pset) > 1:
+                psets[i] = self.predict(test_HVs[i])
+            elif len(pset) == 0 and not allow_empty:
+                psets[i] = self.predict(test_HVs[i])
+
+        return psets
+
+
+    def point_valued_CP_old(self, test_HVs, method='accurate', **kwargs):
         ''' Computes point-valued predictions (Algorithms 3 & 4).
             
             Args:
@@ -563,6 +610,15 @@ class ConformalHDC():
             Returns:
                 predictions: Array of predicted class labels
         '''
+        test_HVs = np.array(test_HVs)
+
+        # Format Check: Ensure 2D (Handle single sample case automatically)
+        if test_HVs.ndim == 1:
+            # Reshape (dim,) -> (1, dim)
+            test_HVs = test_HVs.reshape(1, -1)
+        elif test_HVs.ndim != 2:
+            raise ValueError(f"Input must be a 2D array. Got shape {test_HVs.shape}")
+
         n_test = len(test_HVs)
         n_classes = len(self.canonical_indices)
         
@@ -577,7 +633,8 @@ class ConformalHDC():
             sim_matrix[:, c_idx] = self._sim(test_HVs, proto)
             
         best_canonical_indices = np.argmax(sim_matrix, axis=1)        
+        
         predictions = [self.class_labels[idx] for idx in best_canonical_indices]
         
-        return np.array(predictions)
+        return predictions
     
