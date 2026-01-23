@@ -23,7 +23,7 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "isolet"
-REPETITIONS = 20
+REPETITIONS = 1
 DIM = 10_000
 LEVELS = 21
 BATCH_SIZE = 512
@@ -183,18 +183,17 @@ def run_single_experiment(random_state, alpha):
     sys.stdout.flush()
 
     # Initialize Models
-    chdc_sets = ConformalHDC(protos_train, ID_CLASSES, sim_measure="cosine", random_state=random_state) # Used for Sets & OOD (needs calibration)
-    chdc_point = ConformalHDC(protos_full, ID_CLASSES, sim_measure="cosine", random_state=random_state) # Used for Point predictions
-    
+    chdc = ConformalHDC(protos_train, ID_CLASSES, sim_measure="cosine", random_state=random_state)
+
     exp_results = []
     
     for stype in SCORE_TYPES:
         # Calibrate the set-valued model
-        chdc_sets.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
+        chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
         
-        # 1. Set-Valued Prediction (Using calibrated model)
+        # 1. Set-Valued Prediction 
         for marginal in [True, False]:
-            sets = chdc_sets.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
             sizes = [len(p) for p in sets]
             covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
             
@@ -213,14 +212,15 @@ def run_single_experiment(random_state, alpha):
                 "marginal": marginal,
                 "set_cov": np.mean(covered),
                 "set_size": np.mean(sizes),
-                "min_class_cov": np.min(lc_covs) if lc_covs else 0.0,
+                "lc_covs": lc_covs if lc_covs else 0.0,
                 # Placeholders
-                "point_acc": np.nan, "ood_auroc": np.nan
+                "point_acc": np.nan, "lc_accs":np.nan, "ood_auroc": np.nan
             })
 
-        # 2. Point-Valued Prediction (Using FULL model)
-        preds_pt = chdc_point.point_valued_CP(test_hvs, score_type=stype)
-        acc_pt = accuracy_score(test_y, preds_pt)
+        # 2. Point-Valued Prediction
+        preds_pt = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
+        acc_pt = eval_accuracy(np.array(preds_pt).ravel(), test_y)
+        lc_accs = eval_lc_accuracy(preds_pt, test_y, ID_CLASSES)
 
         exp_results.append({
             "exp": "point_valued",
@@ -228,15 +228,16 @@ def run_single_experiment(random_state, alpha):
             "score_type": stype,
             "alpha": alpha,
             "point_acc": acc_pt,
+            "lc_accs": lc_accs,
             # Placeholders
             "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
-            "min_class_cov": np.nan, "ood_auroc": np.nan
+            "lc_covs": np.nan, "ood_auroc": np.nan
         })
 
-        # 3. OOD Detection (Using calibrated model p-values)
+        # 3. OOD Detection
         for marginal in [True, False]:
-            p_vals_id = chdc_sets.get_max_p_value(test_hvs, marginal=marginal)
-            p_vals_ood = chdc_sets.get_max_p_value(ood_hvs, marginal=marginal)
+            p_vals_id = chdc.get_max_p_value(test_hvs, marginal=marginal)
+            p_vals_ood = chdc.get_max_p_value(ood_hvs, marginal=marginal)
             
             y_true_roc = np.concatenate([np.ones(len(p_vals_id)), np.zeros(len(p_vals_ood))])
             y_scores_roc = np.concatenate([p_vals_id, p_vals_ood])
@@ -252,30 +253,49 @@ def run_single_experiment(random_state, alpha):
                 "ood_auroc": ood_auroc,
                 # Placeholders
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
-                "min_class_cov": np.nan
+                "lc_covs": np.nan, "lc_accs":np.nan
             })
             
     print("Finished running ConformalHDC.")
     sys.stdout.flush()
 
-    # 4. Vanilla Baseline
-    # Using protos_full (Train+Cal) and Cosine Similarity
-    # Note: This is mathematically equivalent to point_valued_CP with score_type='sim' 
-    # if using the same prototypes, but we log it separately.
-    preds_vanilla = chdc_point.point_valued_CP(test_hvs, score_type="sim")
-    acc_vanilla = accuracy_score(test_y, preds_vanilla)
+    # Baseline Vanilla HDC (Once per seed)
+    preds_vanilla = chdc.predict(test_hvs)
+    acc_vanilla = eval_accuracy(preds_vanilla, test_y)
+    lc_accs = eval_lc_accuracy(preds_vanilla, test_y, ID_CLASSES)
     
     exp_results.append({
         "exp": "point_valued",
         "random_state": random_state,
-        "score_type": "vanilla",
-        "alpha": np.nan,
-        "point_acc": acc_vanilla,
+        "score_type": "vanilla_train",
+        "alpha": alpha,
+        "point_acc": acc_vanilla, 
+        "lc_accs": lc_accs,
         # Placeholders
         "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
-        "min_class_cov": np.nan, "ood_auroc": np.nan
+        "lc_covs": np.nan, "ood_auroc": np.nan
     })
     
+    chdc_full = ConformalHDC(protos_full.cpu().numpy(), ID_CLASSES, sim_measure="cosine", random_state=random_state)
+    preds_vanilla = chdc_full.predict(test_hvs)
+    acc_vanilla = eval_accuracy(preds_vanilla, test_y)
+    lc_accs = eval_lc_accuracy(preds_vanilla, test_y, ID_CLASSES)
+    
+    exp_results.append({
+        "exp": "point_valued",
+        "random_state": random_state,
+        "score_type": "vanilla_full",
+        "alpha": alpha,
+        "point_acc": acc_vanilla, 
+        "lc_accs": lc_accs,
+        # Placeholders
+        "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+        "lc_covs": np.nan, "ood_auroc": np.nan
+    })
+    
+    print("Finished running vanilla HDC.")
+    sys.stdout.flush()
+
     return pd.DataFrame(exp_results)
 
 
