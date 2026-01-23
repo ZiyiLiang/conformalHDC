@@ -79,7 +79,6 @@ def eval_lc_accuracy(y_pred, y_true, labels_id):
     for label in labels_id:
         # Mask where the ground truth is the current class
         mask = (y_true == label)
-        
         if np.sum(mask) == 0:
             # Avoid division by zero if class is missing from test set
             accuracies.append(np.nan) 

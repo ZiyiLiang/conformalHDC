@@ -71,28 +71,14 @@ def fit_prototypes(X, y, labels):
         ps.append(d.mean(0) if len(d) > 0 else np.zeros(dim))
     return np.stack(ps)
 
-# Helper to calculate class-conditional accuracy
-def eval_lc_accuracy(preds, targets, labels):
-    accs = []
-    for lbl in labels:
-        idx = np.where(targets == lbl)[0]
-        if len(idx) > 0:
-            acc = accuracy_score(targets[idx], preds[idx])
-            accs.append(acc)
-        else:
-            accs.append(0.0)
-    return accs
 
 ################======== Experiment Logic ========################
 
 def run_single_experiment(random_state, alpha):
-    # Reproducibility
     rng = np.random.RandomState(random_state)
     exp_results = []
 
-    # Iterating over Sigma Range as per Synthetic-3class.py logic
-    for sigma_val in SIGMA_RANGE:
-        
+    for sigma_val in SIGMA_RANGE: 
         # Configuration: Fixed sigmas for class 0 and 1, sweep class 2
         current_sigmas = [1.0, 2.0, sigma_val]
         
@@ -102,6 +88,8 @@ def run_single_experiment(random_state, alpha):
         prototypes = setup_triangle_geometry(SEPARATION, rng)
         X_full, y_full = generate_samples_3class(N_PER_CLASS, prototypes, current_sigmas, rng)
         X_ood = generate_ood_blob(500, prototypes, rng)
+        print("Data generated.")
+        sys.stdout.flush()
 
         # ----------------------------------
         #  Split 
@@ -131,7 +119,9 @@ def run_single_experiment(random_state, alpha):
         X_van = np.concatenate([X_train, X_cal])
         y_van = np.concatenate([y_train, y_cal])
         protos_full = fit_prototypes(X_van, y_van, LABELS_ID)
-        
+        print("Prototypes built.")
+        sys.stdout.flush()
+
         # Initialize Conformal Model
         chdc = ConformalHDC(class_HVs=protos_train, class_labels=LABELS_ID, 
                             sim_measure="euclidean", random_state=random_state)
@@ -208,10 +198,12 @@ def run_single_experiment(random_state, alpha):
                     "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
                     "lc_covs": np.nan, "lc_accs": np.nan
                 })
-
+        print("Finished running ConformalHDC.")
+        sys.stdout.flush()
+    
         # Baseline Vanilla HDC (Train Only)
         preds_vanilla = chdc.predict(X_test)
-        acc_vanilla = accuracy_score(y_test, preds_vanilla)
+        acc_vanilla = accuracy_score(y_test, preds_vanilla)        
         lc_accs = eval_lc_accuracy(preds_vanilla, y_test, LABELS_ID)
         
         exp_results.append({
@@ -244,7 +236,9 @@ def run_single_experiment(random_state, alpha):
             "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
             "lc_covs": np.nan, "ood_auroc": np.nan
         })
-
+    print("Finished running vanilla HDC.")
+    sys.stdout.flush()
+    
     return pd.DataFrame(exp_results)
 
 
