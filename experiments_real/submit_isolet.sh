@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
-ALPHA_LIST=(0.05)
+#SEED_LIST=(1)
+#ALPHA_LIST=(0.05)
 
 # --- EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 10))
-# ALPHA_LIST=(0.05)
+SEED_LIST=($(seq 1 10))
+ALPHA_LIST=(0.05)
 
 # Slurm parameters
 EXPNAME="isolet"
