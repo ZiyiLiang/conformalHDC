@@ -276,7 +276,7 @@ def run_single_experiment(random_state, alpha):
         "lc_covs": np.nan, "ood_auroc": np.nan
     })
     
-    chdc_full = ConformalHDC(protos_full.cpu().numpy(), ID_CLASSES, sim_measure="cosine", random_state=random_state)
+    chdc_full = ConformalHDC(protos_full, ID_CLASSES, sim_measure="cosine", random_state=random_state)
     preds_vanilla = chdc_full.predict(test_hvs)
     acc_vanilla = eval_accuracy(preds_vanilla, test_y)
     lc_accs = eval_lc_accuracy(preds_vanilla, test_y, ID_CLASSES)
@@ -322,16 +322,21 @@ if __name__ == "__main__":
 
     for i in tqdm(range(1, REPETITIONS + 1), desc="Repetitions"):
         current_state = REPETITIONS * (seed_arg - 1) + i
+        print(f"Running repetition {i}...")
+        sys.stdout.flush()
         
         try:
             df_rep = run_single_experiment(current_state, alpha_arg)
             results_list.append(df_rep)
         except Exception as e:
             print(f"Error in state {current_state}: {e}")
+            sys.stdout.flush()
 
     if results_list:
         final_df = pd.concat(results_list, ignore_index=True)
         final_df.to_csv(outfile, index=False)
         print(f"\nResults saved to {outfile}")
+        sys.stdout.flush()
     else:
         print("No results generated.")
+        sys.stdout.flush()
