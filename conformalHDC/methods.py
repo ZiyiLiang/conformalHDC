@@ -458,13 +458,19 @@ class ConformalHDC():
             for i in range(n_test):
                 q = self.quantile if marginal else self.quantiles[c_idx]
                 if test_scores[i] <= q:
-                    real_label = self.class_labels[c_idx]
-                    psets[i].append(real_label)
+                    psets[i].append(c_idx)
         
-        # Trim the psets to get point prediction
+        # Trim the psets and convert to real labels
         for i, pset in enumerate(psets):
-            if len(pset) > 1:
-                psets[i] = self.predict(test_HVs[i])
+            if len(pset) == 1:
+                psets[i] = [self.class_labels[pset[0]]]
+            elif len(pset) > 1:
+                cand_prototypes = self.class_HVs[pset]
+                query_vec = test_HVs[i].reshape(1, -1)
+                query_broadcasted = np.tile(query_vec, (len(pset), 1))
+                pset_sims = self._sim(query_broadcasted, cand_prototypes)
+                psets[i] = [self.class_labels[pset[np.argmax(pset_sims)]]]
+                # psets[i] = self.predict(test_HVs[i])
             elif len(pset) == 0 and not allow_empty:
                 psets[i] = self.predict(test_HVs[i])
 
