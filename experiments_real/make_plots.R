@@ -235,7 +235,7 @@ for (r in rats_to_process) {
 #-------------------------------------------------------------------------------
 # Set your results directory here
 setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
-results_dir <- "./mnist_0.05/" 
+results_dir <- "./mnist/" 
 
 # Pattern matches: seedX_alphaY.csv or similar
 files <- list.files(path = results_dir, pattern = "*.csv", 
