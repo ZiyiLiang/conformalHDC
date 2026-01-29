@@ -6,7 +6,11 @@
 
 # --- EXPERIMENT LIST ---
 SEED_LIST=($(seq 1 10))
+<<<<<<< Updated upstream
 ALPHA_LIST=(0.05 0.02)
+=======
+ALPHA_LIST=(0.05 0.02 0.01)
+>>>>>>> Stashed changes
 
 # Slurm parameters
 EXPNAME="isolet"
