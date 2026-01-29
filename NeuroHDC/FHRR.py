@@ -102,7 +102,7 @@ class RFF:
         '''
             We bundle all sample HVs per class and sign to get one prototype per class.
         Params:
-            train_hvsL: (n_trial,D)
+            train_hvs: (n_trial,D)
             y: (n_trial,) class labels
             weights: class weight
         ''' 

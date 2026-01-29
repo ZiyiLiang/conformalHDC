@@ -139,7 +139,7 @@ def run_single_experiment(random_state, alpha):
     pos_hvs = make_position_hvs(28*28, DIM, device=DEVICE)
     
     # Train Models
-   # 1. Train Only (For ConformalHDC)
+    # 1. Train Only (For ConformalHDC)
     protos_train = build_prototypes(ld_train, pos_hvs, LABELS_ID)
     
     # 2. Full (Train + Calib) (For Vanilla)

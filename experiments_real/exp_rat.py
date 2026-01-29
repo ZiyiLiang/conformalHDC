@@ -68,14 +68,22 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
     enc_test  = rff.encode_all(W, X_test, TB, beta=beta)
     enc_ood   = rff.encode_all(W, X_ood, TB, beta=beta)
     
-    # Prototypes & ConformalHDC
+    # Train Models
+    # 1. Train Only (For ConformalHDC)
     proto_dict = rff.build_class_prototypes(enc_train, y_train)
     unique_labels = sorted(np.unique(y_train))
-    proto_matrix = np.stack([proto_dict[k] for k in unique_labels])
+    proto_train = np.stack([proto_dict[k] for k in unique_labels])
+
+    # 2. Full (Train + Calib) (For Vanilla)
+    enc_full = np.concatenate((enc_train, enc_cal), axis=0)
+    y_full = np.concatenate((y_train, y_cal), axis=0)
+    proto_full_dict = rff.build_class_prototypes(enc_full, y_full)
+    proto_full = np.stack([proto_full_dict[k] for k in unique_labels])
+
     print("Prototypes built.")
     sys.stdout.flush()
     
-    chdc = ConformalHDC(class_HVs=proto_matrix, class_labels=unique_labels, sim_measure="complex_cosine")
+    chdc = ConformalHDC(class_HVs=proto_train, class_labels=unique_labels, sim_measure="complex_cosine")
     
     exp_results = []
 
@@ -106,29 +114,31 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
                 "marginal": marginal,
                 "set_cov": np.mean(covered),
                 "set_size": np.mean(sizes),
-                "min_class_cov": np.min(lc_covs) if lc_covs else 0.0,
+                "lc_covs": lc_covs if lc_covs else 0.0,
                 # Placeholders
-                "point_acc": np.nan, "ood_auroc": np.nan, "method": np.nan
+                "point_acc": np.nan, "lc_accs":np.nan, "ood_auroc": np.nan
             })
         
         # 2. Point-Valued Prediction
-        for method in ["accurate", "efficient"]:
-            preds_pt = chdc.point_valued_CP(enc_test, method=method)
-            acc_pt = accuracy_score(y_test, preds_pt)
+        preds_pt = chdc.point_valued_CP(enc_test, alpha, allow_empty=False, marginal=False)
+        preds_pt = np.array(preds_pt).ravel()
+        acc_pt = eval_accuracy(preds_pt, y_test)
+        lc_accs = eval_lc_accuracy(preds_pt, y_test, unique_labels)
 
-            exp_results.append({
-                "exp": "point_valued",
-                "random_state": random_state,
-                "rat_id": rat_id,
-                "score_type": stype,
-                "alpha": alpha,
-                "beta": beta,
-                "method": method,
-                "point_acc": acc_pt,
-                # Placeholders
-                "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
-                "min_class_cov": np.nan, "ood_auroc": np.nan
-            })
+        exp_results.append({
+            "exp": "point_valued",
+            "random_state": random_state,
+            "rat_id": rat_id,
+            "score_type": stype,
+            "alpha": alpha,
+            "beta": beta,
+            "method": method,
+            "point_acc": acc_pt,
+            "lc_accs": lc_accs,
+            # Placeholders
+            "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+            "lc_covs": np.nan, "ood_auroc": np.nan
+        })
 
         # 3. OOD Detection
         for marginal in [True, False]:
@@ -150,28 +160,52 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
                 "ood_auroc": ood_auroc,
                 # Placeholders
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
-                "min_class_cov": np.nan, "method": np.nan
+                "lc_covs": np.nan, "lc_accs": np.nan
             })
+
     print("Finished running conformaHDC.")
     sys.stdout.flush()
 
-    # Baseline Vanilla HDC (Once per seed)
+     # Baseline Vanilla HDC (Train Only)
     preds_vanilla = chdc.predict(enc_test)
     acc_vanilla = accuracy_score(y_test, preds_vanilla)
-    
+    lc_accs = eval_lc_accuracy(preds_vanilla, y_test, unique_labels)
+
     exp_results.append({
         "exp": "point_valued",
         "random_state": random_state,
         "rat_id": rat_id,
-        "score_type": "cosine",
-        "alpha": np.nan,
+        "score_type": "vanilla_train",
+        "alpha": alpha,
         "beta": beta,
-        "method": "vanilla",
         "point_acc": acc_vanilla,
+        "lc_accs": lc_accs,
         # Placeholders
         "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
-        "min_class_cov": np.nan, "ood_auroc": np.nan
+        "lc_covs": np.nan, "ood_auroc": np.nan
     })
+
+    # Baseline Vanilla HDC (Full Train+Cal)
+    vanilla_full = ConformalHDC(class_HVs=proto_full, class_labels=unique_labels, 
+                                sim_measure="complex_cosine", random_state=random_state)
+    preds_vanilla_full = vanilla_full.predict(enc_test)
+    acc_vanilla_full = accuracy_score(y_test, preds_vanilla_full)
+    lc_accs_full = eval_lc_accuracy(preds_vanilla_full, y_test, unique_labels)
+
+    exp_results.append({
+        "exp": "point_valued",
+        "random_state": random_state,
+        "rat_id": rat_id,
+        "score_type": "vanilla_full",
+        "alpha": alpha,
+        "beta": beta,
+        "point_acc": acc_vanilla_full,
+        "lc_accs": lc_accs_full,
+        # Placeholders
+        "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+        "lc_covs": np.nan, "ood_auroc": np.nan
+    })
+
     print("Finished running vanilla HDC.")
     sys.stdout.flush()
 
@@ -184,7 +218,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
 # ---------------
 if __name__ == "__main__":
     if len(sys.argv) != 5:
-        print("Usage: python exp_rat.py <seed> <rat_id> <alpha>")
+        print("Usage: python exp_rat.py <seed> <rat_id> <beta> <alpha>")
         sys.exit(1)
 
     seed_arg = int(sys.argv[1])

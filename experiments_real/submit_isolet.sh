@@ -6,7 +6,7 @@
 
 # --- EXPERIMENT LIST ---
 SEED_LIST=($(seq 1 10))
-ALPHA_LIST=(0.05)
+ALPHA_LIST=(0.05 0.02)
 
 # Slurm parameters
 EXPNAME="isolet"
