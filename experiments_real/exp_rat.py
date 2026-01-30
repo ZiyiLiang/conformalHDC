@@ -132,7 +132,6 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
             "score_type": stype,
             "alpha": alpha,
             "beta": beta,
-            "method": method,
             "point_acc": acc_pt,
             "lc_accs": lc_accs,
             # Placeholders
