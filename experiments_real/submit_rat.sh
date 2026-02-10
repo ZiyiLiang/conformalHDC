@@ -8,7 +8,7 @@
 # --- FULL EXPERIMENT LIST ---
 SEED_LIST=(1 2 3 4 5)
 RAT_LIST=$(seq 0 4)      
-ALPHA_LIST=(0.2) 
+ALPHA_LIST=(0.1 0.2) 
 BETA_LIST=(0.3)
 
 # Slurm parameters (CPU Only)
