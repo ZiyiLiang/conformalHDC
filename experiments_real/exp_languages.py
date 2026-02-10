@@ -156,17 +156,30 @@ def run_single_experiment(random_state, alpha):
         all_targets.extend(d.targets)
     all_targets = np.array(all_targets)
     
-    # Filter ID vs OOD
-    id_indices = np.where(np.isin(all_targets, ID_LABELS))[0]
-    ood_indices = np.where(~np.isin(all_targets, ID_LABELS))[0]
+    MAX_SAMPLES_PER_CLASS = 2000
+    subsampled_indices = []
+
+    for cls_idx in range(len(all_class_names)):
+        # Get all indices for this specific class
+        cls_indices = np.where(all_targets == cls_idx)[0]
+        np.random.shuffle(cls_indices) 
+        # Take up to the limit
+        subsampled_indices.extend(cls_indices[:MAX_SAMPLES_PER_CLASS])
+    
+    subsample_mask = np.zeros(len(all_targets), dtype=bool)
+    subsample_mask[subsampled_indices] = True
+
+    # Filter ID vs OOD using the subsampled mask
+    id_indices = np.where(np.isin(all_targets, ID_LABELS) & subsample_mask)[0]
+    ood_indices = np.where(~np.isin(all_targets, ID_LABELS) & subsample_mask)[0]
     
     ds_id_full = Subset(ds_full, id_indices)
     ds_ood = Subset(ds_full, ood_indices)
     
-    # Random Split (80% Train, 15% Calib, 5% Test)
+    # Random Split
     n_total = len(ds_id_full)
-    n_train = int(0.80 * n_total)
-    n_calib = int(0.15 * n_total)
+    n_train = int(0.75 * n_total)
+    n_calib = int(0.225 * n_total)
     n_test  = n_total - n_train - n_calib
     
     ds_train, ds_calib, ds_test = random_split(
@@ -180,6 +193,9 @@ def run_single_experiment(random_state, alpha):
     ld_test  = DataLoader(ds_test, batch_size=BATCH_SIZE, shuffle=False)
     ld_ood   = DataLoader(ds_ood, batch_size=BATCH_SIZE, shuffle=False)
     print("Data loading and splitting complete.")
+    print(f"Train size per class: {int(len(ds_train)/len(ID_LANG_STRINGS))}, " +
+        f"calib size per class: {int(len(ds_calib)/len(ID_LANG_STRINGS))}, " +
+        f"test size per class: {int(len(ds_test)/len(ID_LANG_STRINGS))}\n")
     sys.stdout.flush()
     
     # HDC Init & Encoding
@@ -197,10 +213,10 @@ def run_single_experiment(random_state, alpha):
     ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
 
     # Build Prototypes (FLOAT)
-    # A. Train Only (For Calibration & Sets)
+    # 1. Train Only (For ConformalHDC)
     protos_train = build_prototypes_float(train_hvs, train_y, ID_LABELS, DIMENSIONS)
     
-    # B. Full (Train + Calib) (For Point & Vanilla)
+    # 2. Full (Train + Calib) (For Vanilla)
     full_hvs = np.concatenate([train_hvs, cal_hvs])
     full_y = np.concatenate([train_y, cal_y])
     protos_full = build_prototypes_float(full_hvs, full_y, ID_LABELS, DIMENSIONS)
@@ -209,20 +225,20 @@ def run_single_experiment(random_state, alpha):
 
     # Conformal Prediction
     # We pass ID_LABELS so the class maps the ith prototype to the correct real label
-    chdc_sets  = ConformalHDC(protos_train, ID_LABELS, sim_measure="cosine", random_state=random_state)
-    chdc_point = ConformalHDC(protos_full, ID_LABELS, sim_measure="cosine", random_state=random_state)
+    chdc  = ConformalHDC(protos_train, ID_LABELS, sim_measure="cosine", random_state=random_state)
     
     exp_results = []
     
     for stype in SCORE_TYPES:
-        chdc_sets.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
+        chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
         
-        # Set-Valued
+        # 1. Set-Valued Prediction
         for marginal in [True, False]:
-            sets = chdc_sets.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
             sizes = [len(p) for p in sets]
             covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
             
+            # Label conditional coverage
             lc_covs = []
             for lbl in ID_LABELS:
                 lbl_idx = np.where(test_y == lbl)[0]
@@ -237,13 +253,16 @@ def run_single_experiment(random_state, alpha):
                 "marginal": marginal,
                 "set_cov": np.mean(covered),
                 "set_size": np.mean(sizes),
-                "min_class_cov": np.min(lc_covs) if lc_covs else 0.0,
-                "point_acc": np.nan, "ood_auroc": np.nan
+                "min_class_cov": lc_covs if lc_covs else 0.0,
+                # Placeholders
+                "point_acc": np.nan, "lc_accs":np.nan, "ood_auroc": np.nan
             })
-            
-        # Point-Valued
-        preds_pt = chdc_point.point_valued_CP(test_hvs, score_type=stype)
-        acc_pt = accuracy_score(test_y, preds_pt)
+
+        # 2. Point-Valued Prediction
+        preds_pt = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
+        preds_pt = np.array(preds_pt).ravel()
+        acc_pt = accuracy_score(preds_pt, test_y)
+        lc_accs = eval_lc_accuracy(preds_pt, test_y, ID_LABELS)
         
         exp_results.append({
             "exp": "point_valued",
@@ -251,14 +270,16 @@ def run_single_experiment(random_state, alpha):
             "score_type": stype,
             "alpha": alpha,
             "point_acc": acc_pt,
+            "lc_accs": lc_accs,
+            # Placeholders
             "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
-            "min_class_cov": np.nan, "ood_auroc": np.nan
+            "lc_covs": np.nan, "ood_auroc": np.nan
         })
-        
-        # OOD
+
+        # 3. OOD Detection
         for marginal in [True, False]:
-            p_in = chdc_sets.get_max_p_value(test_hvs, marginal=marginal)
-            p_ood = chdc_sets.get_max_p_value(ood_hvs, marginal=marginal)
+            p_in = chdc.get_max_p_value(test_hvs, marginal=marginal)
+            p_ood = chdc.get_max_p_value(ood_hvs, marginal=marginal)
             
             y_roc = np.concatenate([np.ones(len(p_in)), np.zeros(len(p_ood))])
             s_roc = np.concatenate([p_in, p_ood])
@@ -271,25 +292,52 @@ def run_single_experiment(random_state, alpha):
                 "alpha": alpha,
                 "marginal": marginal,
                 "ood_auroc": auroc,
+                # Placeholders
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
-                "min_class_cov": np.nan
+                "lc_covs": np.nan, "lc_accs": np.nan
             })
+            
     print("Finished running ConformalHDC.")
     sys.stdout.flush()
 
-    # Vanilla Baseline
-    preds_vanilla = chdc_point.point_valued_CP(test_hvs, score_type="sim")
-    acc_vanilla = accuracy_score(test_y, preds_vanilla)
+    # Baseline Vanilla HDC (Train Only)
+    preds_vanilla = chdc.predict(test_hvs)
+    acc_vanilla = accuracy_score(preds_vanilla, test_y)
+    lc_accs = eval_lc_accuracy(preds_vanilla, test_y, ID_LABELS)
     
     exp_results.append({
         "exp": "point_valued",
         "random_state": random_state,
-        "score_type": "vanilla",
-        "alpha": np.nan,
+        "score_type": "vanilla_train",
+        "alpha": alpha,
         "point_acc": acc_vanilla,
+        "lc_accs": lc_accs,
+        # Placeholders
         "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
-        "min_class_cov": np.nan, "ood_auroc": np.nan
+        "lc_covs": np.nan, "ood_auroc": np.nan
     })
+
+    # Baseline Vanilla HDC (Full Train+Cal)
+    vanilla_full = ConformalHDC(protos_train, ID_LABELS, 
+                                sim_measure="cosine", random_state=random_state)
+    preds_vanilla_full = vanilla_full.predict(test_hvs)
+    acc_vanilla_full = accuracy_score(preds_vanilla_full, test_y)
+    lc_accs_full = eval_lc_accuracy(preds_vanilla_full, test_y, ID_LABELS)
+    
+    exp_results.append({
+        "exp": "point_valued",
+        "random_state": random_state,
+        "score_type": "vanilla_full",
+        "alpha": alpha,
+        "point_acc": acc_vanilla_full,
+        "lc_accs": lc_accs_full,
+        # Placeholders
+        "marginal": np.nan, "set_cov": np.nan, "set_size": np.nan, 
+        "lc_covs": np.nan, "ood_auroc": np.nan
+    })
+
+    print("Finished running vanilla HDC.")
+    sys.stdout.flush()
     
     return pd.DataFrame(exp_results)
 
