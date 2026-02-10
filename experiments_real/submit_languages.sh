@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
-ALPHA_LIST=(0.01)
+# SEED_LIST=(1)
+# ALPHA_LIST=(0.01)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 5))
-# ALPHA_LIST=(0.01)
+SEED_LIST=($(seq 1 10))
+ALPHA_LIST=(0.01)
 
 # Slurm parameters
 EXPNAME="languages"

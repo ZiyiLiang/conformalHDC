@@ -25,7 +25,7 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "languages"
-REPETITIONS = 1
+REPETITIONS = 10
 DIMENSIONS = 10_000
 MAX_INPUT_SIZE = 128
 BATCH_SIZE = 32
