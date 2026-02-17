@@ -87,7 +87,7 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL, double_column 
     )
   
   # --- 3. Create Plots ---
-  p1 <- ggplot(plot_data %>% filter(Metric == "Accuracy"), 
+  p3 <- ggplot(plot_data %>% filter(Metric == "Accuracy"), 
                aes(x = sigma, y = mean, color = Method, fill = Method)) +
     geom_line(linewidth = 1.2) + 
     geom_ribbon(aes(ymin = mean - se, ymax = mean + se), alpha = 0.4, color = NA) +
@@ -97,17 +97,17 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL, double_column 
     labs(x = expression(sigma), y = NULL) +
     common_theme
   
-  p2 <- ggplot(plot_data %>% filter(Metric == "AUROC", Method != "Inv. quantile"), 
+  p4 <- ggplot(plot_data %>% filter(Metric == "AUROC", Method != "Inv. quantile"), 
                aes(x = sigma, y = mean, color = Method, fill = Method)) +
     geom_line(linewidth = 1.2) +
     geom_ribbon(aes(ymin = mean - se, ymax = mean + se), alpha = 0.4, color = NA) +
     scale_color_manual(values = custom_colors) +
     scale_fill_manual(values = custom_colors) +
-    facet_wrap(~Metric) + 
+    facet_wrap(~Metric, labeller = as_labeller(c("AUROC" = "AUC"))) + 
     labs(x = expression(sigma), y = NULL) +
     common_theme
   
-  p3 <- ggplot(plot_data %>% filter(Metric == "Coverage"), 
+  p1 <- ggplot(plot_data %>% filter(Metric == "Coverage"), 
                aes(x = sigma, y = mean, color = Method, fill = Method)) +
     geom_line(linewidth = 1.2) +
     geom_ribbon(aes(ymin = mean - se, ymax = mean + se), alpha = 0.4, color = NA) +
@@ -119,7 +119,7 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL, double_column 
     labs(x = expression(sigma), y = NULL) +
     common_theme
   
-  p4 <- ggplot(plot_data %>% filter(Metric == "Size"), 
+  p2 <- ggplot(plot_data %>% filter(Metric == "Size"), 
                aes(x = sigma, y = mean, color = Method, fill = Method)) +
     geom_line(linewidth = 1.2) +
     geom_ribbon(aes(ymin = mean - se, ymax = mean + se), alpha = 0.4, color = NA) +
