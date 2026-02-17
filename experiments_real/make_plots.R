@@ -194,7 +194,7 @@ table_dir <- '../../results/tables/isolet/'
 
 create_isolet_table(isolet_data, target_alpha = 0.05, save_dir = table_dir)
 create_isolet_table(isolet_data, target_alpha = 0.02, save_dir = table_dir)
-create_isolet_table(isolet_data, target_alpha = 0.01, save_dir = table_dir)
+#create_isolet_table(isolet_data, target_alpha = 0.01, save_dir = table_dir)
 
 
 
