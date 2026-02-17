@@ -28,7 +28,7 @@ if (length(files) == 0) {
 #------------------
 # Plotting Function
 #------------------
-create_3class_plot <- function(df, target_alpha, save_dir = NULL) {
+create_3class_plot <- function(df, target_alpha, save_dir = NULL, double_column = FALSE) {
   
   # Filter Data by Alpha
   dat <- df %>% 
@@ -68,7 +68,7 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL) {
   
   # --- 2. Custom Colors ---
   custom_colors <- c(
-    "HDC"             = "#000000",  
+    "HDC"           = "#000000",  
     "Inv. quantile"   = "#7bd5e4",  
     "Penalized"       = "#4575a0",  
     "Similarity"      = "#a1d991",  
@@ -76,19 +76,17 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL) {
     "CHDC-discount"   = "#CC3333"
   )
   
-  # Common Theme (Larger Fonts)
+  # Common Theme
   common_theme <- theme_bw() +
     theme(
       legend.position = "none", 
       axis.title = element_text(size = 18),
-      axis.text = element_text(size = 14),
-      strip.text = element_text(size = 16), 
+      axis.text = element_text(size = 16),
+      strip.text = element_text(size = 18), 
       strip.background = element_rect(fill = "grey90")   
     )
   
   # --- 3. Create Plots ---
-  # We use facet_wrap(~Metric) to get the grey banner header back
-  
   p1 <- ggplot(plot_data %>% filter(Metric == "Accuracy"), 
                aes(x = sigma, y = mean, color = Method, fill = Method)) +
     geom_line(linewidth = 1.2) + 
@@ -132,6 +130,9 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL) {
     common_theme
   
   # --- 4. Shared Legend Extraction ---
+  # Adjust legend rows based on layout flag
+  leg_rows <- if(double_column) 2 else 1
+  
   legend_plot <- ggplot(plot_data, aes(x = sigma, y = mean, color = Method)) +
     geom_line(linewidth = 2) + 
     scale_color_manual(values = custom_colors) +
@@ -139,28 +140,46 @@ create_3class_plot <- function(df, target_alpha, save_dir = NULL) {
     theme(
       legend.position = "bottom", 
       legend.title = element_blank(), 
-      legend.text = element_text(size=15), 
-      legend.key.width = unit(1.5, "cm") 
+      legend.text = element_text(size=16), 
+      legend.key.width = unit(1.2, "cm"),
+      legend.margin = margin(t = -5, b = -5), # Reduce internal vertical padding
+      legend.box.margin = margin(t = 0, b = 0) # Remove external padding
     ) +
-    guides(color = guide_legend(nrow = 1)) 
+    guides(color = guide_legend(nrow = leg_rows)) 
   
   shared_legend <- get_legend(legend_plot)
   
   # --- 5. Assembly ---
-  plots_row <- arrangeGrob(p1, p2, p3, p4, nrow = 1)
-  
-  final_object <- arrangeGrob(
-    plots_row,
-    shared_legend,
-    nrow = 2,
-    heights = c(1, 0.15)
-  )
+  if (double_column) {
+    # 2x2 Grid Layout
+    plots_grid <- arrangeGrob(p1, p2, p3, p4, nrow = 2, ncol = 2)
+    final_object <- arrangeGrob(
+      plots_grid,
+      shared_legend,
+      nrow = 2,
+      heights = c(1, 0.12)
+    )
+    fig_width <- 8
+    fig_height <- 6
+  } else {
+    # 1x4 Row Layout
+    plots_row <- arrangeGrob(p1, p2, p3, p4, nrow = 1)
+    final_object <- arrangeGrob(
+      plots_row,
+      shared_legend,
+      nrow = 2,
+      heights = c(1, 0.15)
+    )
+    fig_width <- 12
+    fig_height <- 3.5
+  }
   
   if (!is.null(save_dir)) {
     if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
-    filename <- file.path(save_dir, paste0("3class_plot_alpha", target_alpha, ".pdf"))
+    suffix <- if(double_column) "_2x2" else ""
+    filename <- file.path(save_dir, paste0("3class_plot_alpha", target_alpha, suffix, ".pdf"))
     
-    ggsave(filename, final_object, width = 12, height = 3.5) 
+    ggsave(filename, final_object, width = fig_width, height = fig_height) 
     cat(paste("Saved plot:", filename, "\n"))
   } else {
     grid.draw(final_object)
@@ -351,8 +370,9 @@ create_3class_table <- function(df, target_alpha, save_dir = NULL) {
   }
 }
 
-# plot_dir <- '../../results/plots/'
-# create_3class_plot(full_data, target_alpha = 0.1,  save_dir = plot_dir)
+plot_dir <- '../../results/plots/'
+create_3class_plot(full_data, target_alpha = 0.1,  save_dir = plot_dir)
+create_3class_plot(full_data, target_alpha = 0.1, save_dir = plot_dir, double_column = TRUE)
 
-table_dir <- '../../results/tables/'
-create_3class_table(full_data, target_alpha = 0.1, save_dir = table_dir)
+# table_dir <- '../../results/tables/'
+# create_3class_table(full_data, target_alpha = 0.1, save_dir = table_dir)

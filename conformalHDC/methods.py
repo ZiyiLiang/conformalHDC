@@ -289,8 +289,10 @@ class ConformalHDC():
             an = np.linalg.norm(HV1s, axis=1)
             bn = np.linalg.norm(HV2s, axis=1)
             epsilon = 1e-8
+            #sims = dot_products / (an * bn + epsilon)  # range from [-1,1] 
             sims = dot_products / (an * bn + epsilon) 
-        
+            sims = (1 + sims) / 2  # ranges from [0,1]
+
         elif self.sim_measure == "complex_cosine":
             D = HV1s.shape[1]
             sims = np.real(np.sum(HV1s * np.conj(HV2s), axis=1)) / D
