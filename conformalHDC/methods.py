@@ -281,8 +281,9 @@ class ConformalHDC():
         HV2s = np.atleast_2d(HV2s)
 
         if self.sim_measure == "euclidean":
-            #sims = -np.linalg.norm(HV1s - HV2s, axis=1)
-            sims = 1/np.linalg.norm(HV1s - HV2s, axis=1)
+            # sims = 1/np.linalg.norm(HV1s - HV2s, axis=1)
+            norm = np.linalg.norm(HV1s - HV2s, axis=1)
+            sims = np.where(norm == 0, 1e8, 1.0 / norm)
 
         elif self.sim_measure == "cosine":
             dot_products = (HV1s * HV2s).sum(axis=1)

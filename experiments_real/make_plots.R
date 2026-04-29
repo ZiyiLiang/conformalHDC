@@ -705,7 +705,7 @@ if (length(files) == 0) {
 } else {
   odor_data <- files %>% 
     map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(full_data), "\n"))
+  cat(paste("Loaded", length(files), "files. Total rows:", nrow(odor_data), "\n"))
 }
 
 #------------------
@@ -853,11 +853,11 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
 
 create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
   
-  # 1. Define targets and mapping
-  target_rats <- c('Buchanan', 'Stella', 'Superchris')
+  # Define targets and mapping
+  target_rats <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
   rat_names_map <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
   
-  # 2. Filter and Process Data
+  # Filter and Process Data
   dat <- df %>% 
     filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha),
            abs(beta - target_beta) < 1e-6 | is.na(beta)) %>%
@@ -873,7 +873,7 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
   
-  # 3. Aggregate Means
+  # Aggregate Means
   summary_stats <- dat %>%
     group_by(Rat_Full, score_type) %>%
     summarise(
@@ -906,14 +906,14 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
   wide_df <- wide_df[, col_order]
   
   # LaTeX Formatting
-  align_str <- "l|l|ccc|ccc|ccc|"
+  align_str <- "ll|ccc|ccc|ccc|ccc|ccc|"
   
   # Custom Header Construction
   header_cmd <- paste0(
     "\\hline\n",
-    " & \\multicolumn{3}{c|}{\\textbf{Buchanan}} & \\multicolumn{3}{c|}{\\textbf{Stella}} & \\multicolumn{3}{c|}{\\textbf{Superchris}} \\\\\n",
-    "\\cline{2-10}\n",
-    "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
+    " & \\multicolumn{3}{c|}{\\textbf{Barat}} & \\multicolumn{3}{c|}{\\textbf{Buchanan}} & \\multicolumn{3}{c|}{\\textbf{Mitt}} & \\multicolumn{3}{c|}{\\textbf{Stella}} & \\multicolumn{3}{c|}{\\textbf{Superchris}} \\\\\n",
+    "\\cline{2-16}\n",
+    "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
     "\\hline\n"
   )
   
@@ -936,9 +936,9 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
 #------------------
 table_dir <- '../../results/tables/odor_decoding/'
 
-#create_odor_full_table(full_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
+create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 
-create_odor_summary_table(full_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
+create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 
 
 
