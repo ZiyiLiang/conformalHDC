@@ -1,15 +1,15 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
-ALPHA_LIST=(0.1)
+# SEED_LIST=(1)
+# ALPHA_LIST=(0.1)
 
 # --- EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 10))
-# ALPHA_LIST=(0.1 0.15 0.2)
+SEED_LIST=($(seq 1 10))
+ALPHA_LIST=(0.1 0.15 0.2)
 
 # Slurm parameters
-EXPNAME="har"
+EXPNAME="uci_har"
 MEMO=8G                            
 TIME=00-03:00:00                 
 CORE=1                        
