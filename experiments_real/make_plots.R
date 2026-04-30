@@ -570,12 +570,316 @@ table_dir <- '../../results/tables/languages/'
 create_languages_table(languages_data, target_alpha = 0.01, save_dir = table_dir)
 
 
+#-------------------------------------------------------------------------------
+#                           UCI HAR Exp
+#-------------------------------------------------------------------------------
+# Set your results directory here
+setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+results_dir <- "./uci_har/" 
+
+# Pattern matches: seedX_alphaY.csv
+files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
+                    full.names = TRUE, recursive = TRUE)
+
+if (length(files) == 0) {
+  warning("No result files found! Check your directory path.")
+} else {
+  uci_har_data <- files %>% 
+    map_df(~read_csv(., show_col_types = FALSE))
+  cat(paste("Loaded", length(files), "files. Total rows:", nrow(uci_har_data), "\n"))
+}
+
+
+#------------------
+# Table Generation 
+#------------------
+format_metric <- function(val_mean, val_se) {
+  if (is.na(val_mean)) return("-")
+  sprintf("%.3f (%.3f)", val_mean, val_se)
+}
+
+create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
+  
+  # Filter Data by Alpha 
+  dat <- df %>% 
+    filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
+    filter(score_type != "vanilla_train")
+  
+  if (nrow(dat) == 0) {
+    warning(paste("No data found for alpha =", target_alpha))
+    return(NULL)
+  }
+  
+  #-----------------------
+  #  HDC Singleton Logic
+  #-----------------------
+  # Treat HDC (vanilla_full) as producing a singleton set:
+  #   - Set Coverage = Point Accuracy
+  #   - Set Size     = 1.0
+  hdc_as_sets <- dat %>%
+    filter(score_type == "vanilla_full", exp == "point_valued") %>%
+    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
+    mutate(
+      exp = "set_valued",
+      marginal = TRUE,
+      score_type = "vanilla_full",
+      set_cov = point_acc, # Coverage becomes Accuracy
+      set_size = 1.0       # Size is always 1
+    )
+  
+  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  dat <- dat %>%
+    filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
+    bind_rows(hdc_as_sets)
+  
+  #------------------------------------------------
+  # Aggregation (Grouped by Score Type)
+  #------------------------------------------------
+  
+  # --- A. Set-Valued Metrics (Marginal Only) ---
+  set_metrics <- dat %>%
+    filter(exp == "set_valued", marginal == TRUE) %>%
+    group_by(score_type) %>%
+    summarise(
+      n = n(),
+      m_cov_u = mean(set_cov, na.rm=TRUE), 
+      m_cov_se = sd(set_cov, na.rm=TRUE) / sqrt(n),
+      m_siz_u = mean(set_size, na.rm=TRUE), 
+      m_siz_se = sd(set_size, na.rm=TRUE) / sqrt(n),
+      .groups = "drop"
+    )
+  
+  # --- B. Point-Valued Metrics ---
+  point_metrics <- dat %>%
+    filter(exp == "point_valued") %>%
+    group_by(score_type) %>%
+    summarise(
+      n = n(),
+      acc_u = mean(point_acc, na.rm=TRUE), 
+      acc_se = sd(point_acc, na.rm=TRUE) / sqrt(n),
+      .groups = "drop"
+    )
+  
+  # --- C. OOD Metrics ---
+  ood_metrics <- dat %>%
+    filter(exp == "ood", marginal == TRUE) %>%
+    group_by(score_type) %>%
+    summarise(
+      n = n(),
+      ood_u = mean(ood_auroc, na.rm=TRUE), 
+      ood_se = sd(ood_auroc, na.rm=TRUE) / sqrt(n),
+      .groups = "drop"
+    )
+  
+  # --- D. Merge & Format ---
+  base <- tibble(score_type = unique(dat$score_type))
+  
+  joined <- base %>%
+    left_join(set_metrics, by="score_type") %>%
+    left_join(point_metrics, by="score_type") %>%
+    left_join(ood_metrics, by="score_type")
+  
+  formatted <- joined %>%
+    mutate(
+      `Cov` = mapply(format_metric, m_cov_u, m_cov_se),
+      `Size` = mapply(format_metric, m_siz_u, m_siz_se),
+      `Accuracy` = mapply(format_metric, acc_u, acc_se),
+      `AUROC` = mapply(format_metric, ood_u, ood_se)
+    )
+  
+  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  formatted <- formatted %>%
+    mutate(Method = case_when(
+      score_type == "vanilla_full" ~ "HDC",
+      score_type == "inverse_quantile" ~ "Inv. quantile",
+      score_type == "penalized" ~ "Penalized",
+      score_type == "sim" ~ "Similarity",
+      score_type == "ratio" ~ "CHDC-ratio",
+      score_type == "discount" ~ "CHDC-discount",
+      TRUE ~ score_type
+    )) %>%
+    filter(Method != "vanilla_train") %>%
+    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
+                                      "Similarity", "CHDC-ratio", "CHDC-discount"))) %>%
+    select(Method, Cov, Size, Accuracy, AUROC)
+  
+  # --- F. Construct LaTeX Header ---
+  align_str <- "l|l|cc|c|c|"
+  
+  additor <- list()
+  additor$pos <- list(0)
+  additor$command <- paste0(
+    "\\hline\n",
+    " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
+    "\\cline{2-5}\n",
+    "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
+    "\\hline\n"
+  )
+  
+  # --- G. Save/Print ---
+  ltx <- xtable(formatted, align = align_str)
+  
+  if (!is.null(save_dir)) {
+    if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
+    filename <- file.path(save_dir, paste0("uci_har_table_alpha", target_alpha, ".tex"))
+    
+    print(ltx, file = filename, 
+          floating = FALSE,          
+          include.rownames = FALSE, 
+          include.colnames = FALSE, 
+          sanitize.text.function = function(x){x}, 
+          add.to.row = additor, 
+          hline.after = c(nrow(formatted)),
+          comment = FALSE)
+    
+    cat(paste("Saved tabular to:", filename, "\n"))
+  } else {
+    print(ltx, 
+          floating = FALSE,
+          include.rownames = FALSE, 
+          include.colnames = FALSE,
+          sanitize.text.function = function(x){x}, 
+          add.to.row = additor, 
+          hline.after = c(nrow(formatted)),
+          comment = FALSE)
+  }
+}
+
+#------------------
+# Save Table 
+#------------------
+table_dir <- '../../results/tables/uci_har/'
+
+# Generate for typical Alphas
+create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
+create_uci_har_table(uci_har_data, target_alpha = 0.15, save_dir = table_dir)
+create_uci_har_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
+
+
+
+#-------------------------------------------------------------------------------
+#                           Runtime Summary Table (UCI HAR)
+#-------------------------------------------------------------------------------
+# Set your results directory here
+setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+results_dir <- "./uci_har/" 
+
+files_rt <- list.files(path = results_dir, pattern = ".*_runtime\\.csv", 
+                       full.names = TRUE, recursive = TRUE)
+
+if (length(files_rt) == 0) {
+  warning("No runtime files found!")
+} else {
+  uci_har_runtime <- files_rt %>% 
+    set_names() %>% # Keep filenames for the .id column
+    map_df(~read_csv(., show_col_types = FALSE), .id = "filename") %>%
+    # Extract the numeric alpha value from the filename (e.g., "...alpha0.1_...")
+    mutate(alpha = as.numeric(str_extract(filename, "(?<=alpha)[0-9.]+")))
+  
+  cat(paste("Loaded", length(files_rt), "runtime files.\n"))
+}
+
+#------------------
+# Generate Table 
+#------------------
+create_runtime_table <- function(runtime_df, target_alpha, save_path = NULL) {
+  
+  # Helper to format seconds to 2 decimal places
+  format_seconds <- function(sec) {
+    if (is.na(sec)) return("-")
+    sprintf("%.3f", sec)
+  }
+  
+  # Filter for target_alpha, 'ratio' score, and set up target rows
+  rt_dat <- runtime_df %>%
+    filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>% # Filter by Alpha
+    filter(score_type == "ratio") %>%
+    mutate(
+      Task = case_when(
+        exp == "set_valued" & marginal == TRUE  ~ "Set-valued marg.",
+        exp == "set_valued" & marginal == FALSE ~ "Set-valued cond.",
+        exp == "point_valued"                   ~ "Point-valued",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(!is.na(Task))
+  
+  # Average across seeds and normalize inference for 100 points
+  rt_summary <- rt_dat %>%
+    group_by(Task) %>%
+    summarise(
+      Training_raw    = mean(training_time, na.rm = TRUE),
+      Calibration_raw = mean(calib_overhead, na.rm = TRUE),
+      Encoding_raw    = mean((encoding_test / n_test) * 200, na.rm = TRUE),
+      HDC_raw         = mean((hdc_inference / n_test) * 200, na.rm = TRUE),
+      Conformal_raw   = mean((inference_overhead / n_test) * 200, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    # Ensure specific row order
+    mutate(Task = factor(Task, levels = c("Set-valued marg.", "Set-valued cond.", "Point-valued"))) %>%
+    arrange(Task)
+  
+  # Apply 2-decimal seconds formatting
+  final_tab <- rt_summary %>%
+    mutate(
+      Training    = sapply(Training_raw, format_seconds),
+      Calibration = sapply(Calibration_raw, format_seconds),
+      Encoding    = sapply(Encoding_raw, format_seconds),
+      HDC         = sapply(HDC_raw, format_seconds),
+      Conformal   = sapply(Conformal_raw, format_seconds)
+    ) %>%
+    select(Task, Training, Calibration, Encoding, HDC, Conformal)
+  
+  # LaTeX Formatting
+  align_str <- "l|l|c|c|ccc|"
+  
+  additor <- list(
+    pos = list(0), 
+    command = paste0(
+      "\\hline\n",
+      " & & & \\multicolumn{3}{c|}{\\textbf{Inference (200 points)}} \\\\\n",
+      "\\cline{4-6}\n",
+      "\\textbf{Algorithm} & \\textbf{Training} & \\textbf{Calibration} & \\textbf{Encoding} & \\textbf{HDC} & \\textbf{Conformal} \\\\\n",
+      "\\hline\n"
+    )
+  )
+  
+  ltx <- xtable(final_tab, align = align_str)
+  
+  print_args <- list(
+    x = ltx,
+    floating = FALSE,
+    include.rownames = FALSE,
+    include.colnames = FALSE,
+    sanitize.text.function = function(x) x,
+    add.to.row = additor,
+    hline.after = c(nrow(final_tab)),
+    comment = FALSE
+  )
+  
+  # Save/Print
+  if (!is.null(save_path)) {
+    if (!dir.exists(dirname(save_path))) dir.create(dirname(save_path), recursive = TRUE)
+    do.call(print, c(print_args, list(file = save_path)))
+    cat(paste("Saved runtime tabular to:", save_path, "\n"))
+  } else {
+    do.call(print, print_args)
+  }
+}
+
+#------------------
+# Save Table 
+#------------------
+runtime_table_path <- '../../results/tables/uci_har_runtime.tex'
+create_runtime_table(uci_har_runtime, target_alpha = 0.1, save_path = runtime_table_path)
+
+
 
 #-------------------------------------------------------------------------------
 #                           Combined Summary Table 
 #-------------------------------------------------------------------------------
-create_combined_table <- function(iso_df, mnist_df, lang_df, 
-                                  iso_alpha, mnist_alpha, lang_alpha, 
+create_combined_table <- function(iso_df, mnist_df, lang_df, uci_df,
+                                  iso_alpha, mnist_alpha, lang_alpha, uci_alpha,
                                   save_path = NULL) {
   
   # Internal helper to aggregate metrics for a specific dataset and alpha
@@ -620,8 +924,9 @@ create_combined_table <- function(iso_df, mnist_df, lang_df,
   iso_summ <- get_summary(iso_df, iso_alpha)
   mni_summ <- get_summary(mnist_df, mnist_alpha)
   lng_summ <- get_summary(lang_df, lang_alpha)
+  uci_summ <- get_summary(uci_df, uci_alpha)
   
-  # Join datasets: MNIST, Languages, ISOLET
+  # Join datasets: MNIST, Languages, ISOLET, UCI HAR
   final_tab <- mni_summ %>%
     select(Method, Cov_Mni = Cov, Size_Mni = Size, AUROC_Mni = AUROC) %>%
     full_join(
@@ -632,22 +937,27 @@ create_combined_table <- function(iso_df, mnist_df, lang_df,
       iso_summ %>% select(Method, Cov_Iso = Cov, Size_Iso = Size, AUROC_Iso = AUROC),
       by = "Method"
     ) %>%
+    full_join(
+      uci_summ %>% select(Method, Cov_Uci = Cov, Size_Uci = Size, AUROC_Uci = AUROC),
+      by = "Method"
+    ) %>%
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   
   # LaTeX Formatting
-  # Alignment: Method (l) | MNIST (ccc) | Languages (ccc) | ISOLET (ccc)
-  align_str <- "l|l|ccc|ccc|ccc|"
+  # Alignment: Method (l) | MNIST (ccc) | Languages (ccc) | ISOLET (ccc) | UCI HAR (ccc)
+  align_str <- "l|l|ccc|ccc|ccc|ccc|"
   
   mni_head <- paste0("\\textbf{MNIST ($\\alpha=", mnist_alpha, "$)}")
   lng_head <- paste0("\\textbf{Languages ($\\alpha=", lang_alpha, "$)}")
   iso_head <- paste0("\\textbf{ISOLET ($\\alpha=", iso_alpha, "$)}")
+  uci_head <- paste0("\\textbf{UCI HAR ($\\alpha=", uci_alpha, "$)}")
   
   additor <- list(pos = list(0), command = paste0(
     "\\hline\n",
-    " & \\multicolumn{3}{c|}{", mni_head, "} & \\multicolumn{3}{c|}{", lng_head, "} & \\multicolumn{3}{c|}{", iso_head, "} \\\\\n",
-    "\\cline{2-10}\n",
-    "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
+    " & \\multicolumn{3}{c|}{", mni_head, "} & \\multicolumn{3}{c|}{", lng_head, "} & \\multicolumn{3}{c|}{", iso_head, "} & \\multicolumn{3}{c|}{", uci_head, "} \\\\\n",
+    "\\cline{2-13}\n",
+    "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
     "\\hline\n"
   ))
   
@@ -683,11 +993,14 @@ create_combined_table(
   iso_df = isolet_data, 
   mnist_df = mnist_data, 
   lang_df = languages_data, 
+  uci_df = uci_har_data,
   iso_alpha = 0.02, 
   mnist_alpha = 0.05, 
   lang_alpha = 0.01, 
+  uci_alpha = 0.1, 
   save_path = combined_path
 )
+
 
 #-------------------------------------------------------------------------------
 #                           Odor Decoding Exp
