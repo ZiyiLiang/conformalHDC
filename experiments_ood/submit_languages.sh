@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
+# SEED_LIST=(1)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 5))
+SEED_LIST=($(seq 1 5))
 
 EXPNAME="ood_languages"
 
 # Slurm parameters
 MEMO=8G                             
-TIME=00-01:00:00                    
+TIME=00-03:00:00                    
 CORE=1                              
 
 # Assemble order
@@ -49,7 +49,7 @@ for SEED in ${SEED_LIST[@]}; do
         ERRF=$LOGS"/"$JOBN".err"
         
         # Assemble slurm order
-        ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT"
+        ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
         
         # Print and Submit
         echo $ORD

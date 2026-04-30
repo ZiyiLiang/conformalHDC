@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
+# SEED_LIST=(1)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 10))
+SEED_LIST=($(seq 1 5))
 
 EXPNAME="ood_isolet"
 
