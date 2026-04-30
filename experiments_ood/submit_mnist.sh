@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
+#SEED_LIST=(1)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 10))
+SEED_LIST=($(seq 1 5))
 
 EXPNAME="ood_mnist"
 
 # Slurm parameters
 MEMO=8G                             
-TIME=00-01:00:00                    
+TIME=00-00:30:00                    
 CORE=1                              
 
 # Assemble order
@@ -42,8 +42,7 @@ for SEED in ${SEED_LIST[@]}; do
         ((incomp++))
         
         # Script to be run: <seed>
-        # Ensure you have run_ood_mnist.sh created as the wrapper
-        SCRIPT="run_ood_mnist.sh $SEED"
+        SCRIPT="ood_mnist.sh $SEED"
         
         # Log files
         OUTF=$LOGS"/"$JOBN".out"
