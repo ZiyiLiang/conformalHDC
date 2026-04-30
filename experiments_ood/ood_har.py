@@ -22,7 +22,7 @@ except ImportError:
 
 # Fixed Constants
 EXP_NAME = "ood_har"
-REPETITIONS = 1
+REPETITIONS = 10
 DIM = 10_000
 LEVELS = 21
 BATCH_SIZE = 512

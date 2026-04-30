@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-SEED_LIST=(1)
+# SEED_LIST=(1)
 
 # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 5))
+SEED_LIST=($(seq 1 5))
 
 EXPNAME="ood_har"
 
@@ -49,7 +49,7 @@ for SEED in ${SEED_LIST[@]}; do
         ERRF=$LOGS"/"$JOBN".err"
         
         # Assemble slurm order
-        ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIP
+        ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
         
         # Print and Submit
         echo $ORD
