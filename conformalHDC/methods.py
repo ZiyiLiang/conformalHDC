@@ -74,63 +74,94 @@ class ConformalHDC():
         return sims
 
 
+    def _sim_matrix(self, HVs):
+        ''' Similarities between every HV and every class prototype.
+
+            Args:
+                HVs: Input hypervectors, shape (n, dim). A single (dim,) HV is also accepted.
+            Returns:
+                sim_matrix: shape (n, n_class), entry [i, c] is _sim(HVs[i], class_HVs[c])
+        '''
+        HVs = np.atleast_2d(np.asarray(HVs))
+
+        sim_matrix = np.zeros((len(HVs), len(self.canonical_indices)))
+        for c_idx in self.canonical_indices:
+            proto = np.asarray(self.class_HVs[c_idx]).reshape(1, -1)
+            sim_matrix[:, c_idx] = self._sim(HVs, proto)
+
+        return sim_matrix
+
+
+    def _inverse_quantile_scores(self, sim_matrix, targets, U=None):
+        ''' Generalized Inverse Quantile Score.
+            Turns similarities into probabilities via Softmax, accumulates probability
+            mass up to the target label, and randomizes to get exact coverage.
+
+            U: one uniform draw per row. Supplied by callers that batch several models
+               into one matrix and need the same draw reused per sample.
+        '''
+        rows = np.arange(len(targets))
+
+        exp_sims = np.exp(sim_matrix - sim_matrix.max(axis=1, keepdims=True))
+        pi_hat = exp_sims / exp_sims.sum(axis=1, keepdims=True)
+
+        # Rank of the target label when probabilities are sorted ascending
+        indices_sorted = np.argsort(pi_hat, axis=1)
+        cumulative_probs = np.take_along_axis(pi_hat, indices_sorted, axis=1).cumsum(axis=1)
+        ranks = np.argmax(indices_sorted == targets[:, None], axis=1)
+
+        if U is None:
+            # randomize to get exact coverage
+            U = np.random.RandomState(self.random_state).uniform(0, 1, size=len(targets))
+        return -cumulative_probs[rows, ranks] + U * pi_hat[rows, targets]
+
+
+    def _scores_from_sims(self, sim_matrix, canonical_targets,
+                          score_type="discount", U=None, **kwargs):
+        ''' Converts a (n, n_class) similarity matrix into nonconformity scores.
+            Larger scores mean the target label fits its HV worse.
+
+            Args:
+                sim_matrix: similarities against every class, shape (n, n_class)
+                canonical_targets: canonical index of the target label per row
+                score_type: which nonconformity score to use
+        '''
+        targets = np.asarray(canonical_targets).astype(int)
+        sim_matrix = np.asarray(sim_matrix, dtype=float)[:len(targets)]
+        rows = np.arange(len(targets))
+
+        sim_true_class = sim_matrix[rows, targets]
+        sim_all_classes = sim_matrix.sum(axis=1)
+        sim_other_classes = sim_all_classes - sim_true_class
+
+        if score_type == "discount":
+            return -(sim_true_class / sim_all_classes) * sim_true_class
+        elif score_type == "alt_discount":
+            return -(sim_true_class / sim_other_classes) * sim_true_class
+        elif score_type == "ratio":
+            return -sim_true_class / sim_all_classes
+        elif score_type == "alt_ratio":
+            return -sim_true_class / sim_other_classes
+        elif score_type == "sim":
+            return -sim_true_class
+        elif score_type == "penalized":
+            penalty = kwargs.get("penalty", 1)
+            return -sim_true_class + penalty * sim_other_classes
+        elif score_type == "inverse_quantile":
+            return self._inverse_quantile_scores(sim_matrix, targets, U=U)
+        else:
+            raise ValueError(f"Unknown score type: {score_type}")
+
+
     def _compute_nonconformity_scores(self, HVs, canonical_targets,
                                    score_type="discount", **kwargs):
         ''' Computes the nonconformity scores of the HVs
         '''
-        rng = np.random.RandomState(self.random_state)
-        scores = np.zeros(len(canonical_targets))
-
-        for i, (HV, target_idx) in enumerate(zip(HVs, canonical_targets)):
-            sims_list = []
-            sim_all_classes = 0
-            sim_true_class = 0
-            for c_idx in self.canonical_indices:
-                sim = self._sim(HV.reshape(1, -1), self.class_HVs[c_idx].reshape(1, -1))
-                sims_list.append(sim.item()) # Ensure it's a scalar
-
-                sim_all_classes += sim
-                if c_idx == target_idx:
-                    sim_true_class = sim
-
-            if score_type == "discount":
-                score = -(sim_true_class/sim_all_classes)*(sim_true_class)
-            elif score_type == "alt_discount":
-                score = -(sim_true_class/(sim_all_classes-sim_true_class))*(sim_true_class)
-            elif score_type == "ratio":
-                score = -sim_true_class/sim_all_classes
-            elif score_type == "alt_ratio":
-                score = -sim_true_class/(sim_all_classes-sim_true_class)
-            elif score_type == "sim":
-                score = -sim_true_class
-            elif score_type == "penalized":
-                penalty = kwargs.get("penalty",1)
-                sim_other_classes = sim_all_classes - sim_true_class
-                score = -sim_true_class + penalty * sim_other_classes
-            # Generalized Inverse Quantile Score 
-            elif score_type == "inverse_quantile":
-                # Convert similarities to probabilities via Softmax
-                sims_arr = np.array(sims_list)
-                exp_sims = np.exp(sims_arr - np.max(sims_arr))
-                pi_hat = exp_sims / np.sum(exp_sims)
-                
-                pi_true = pi_hat[target_idx]
-                indices_sorted = np.argsort(pi_hat)
-                pi_sorted = pi_hat[indices_sorted]
-
-                rank_idx = np.where(indices_sorted == target_idx)[0][0]
-                cumulative_prob = np.sum(pi_sorted[:rank_idx+1])
-                
-                # randomize to get exact coverage
-                U = rng.uniform(0, 1)
-                score = - cumulative_prob + U * pi_true
-            else:
-                 print("Unknown score type!")
-            scores[i] = score 
-            
-        return scores
-    
-
+        return self._scores_from_sims(
+            self._sim_matrix(HVs), canonical_targets,
+            score_type=score_type, **kwargs,
+        )
+ 
     def set_valued_CP(self, test_HVs, alpha, 
                     allow_empty=True,
                     marginal=False, **kwargs):
@@ -160,7 +191,7 @@ class ConformalHDC():
                 if test_scores[i] <= q:
                     real_label = self.class_labels[c_idx]
                     psets[i].append(real_label)
-            
+        #TODO add ood label?
         if not allow_empty:
             for i, pset in enumerate(psets):
                 if len(pset)==0:

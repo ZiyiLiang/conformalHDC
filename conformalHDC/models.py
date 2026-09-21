@@ -18,5 +18,3 @@ class NormalClusters():
         
         return np.concatenate(X), np.concatenate(Y)
     
-
-    
