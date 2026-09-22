@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import ConcatDataset, Subset, DataLoader, random_split
 from torchhd import functional, embeddings
-from torchhd.datasets import EuropeanLanguages as Languages
 import re
 import numpy as np
 import pandas as pd
@@ -12,11 +11,16 @@ from pathlib import Path
 from sklearn.metrics import accuracy_score, roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from data.load import load_languages_data
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
+    from conformalHDC.jackknife import JackknifePlusHDC
+    from conformalHDC.fcp import FullConformalHDC
 except ImportError:
     print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -85,7 +89,7 @@ class LanguageEncoder(nn.Module):
         symbols = self.symbol(x_ids)          # [B, T, D]
         hv = functional.ngrams(symbols, n=3)  # [B, D]
         # Bipolarize sample hypervectors
-        hv = functional.hard_quantize(hv)     
+        hv = functional.normalize(hv) #functional.hard_quantize(hv)     
         return hv
 
 @torch.no_grad()
@@ -130,9 +134,7 @@ def run_single_experiment(random_state, alpha):
         torch.cuda.manual_seed_all(random_state)
     
     # Data Loading
-    data_root = "./data"
-    train_ds_raw = Languages(data_root, train=True, transform=transform, download=True)
-    test_ds_raw  = Languages(data_root, train=False, transform=transform, download=True)
+    train_ds_raw, test_ds_raw = load_languages_data(transform)
     
     # Map Strings to Integer Labels
     all_class_names = train_ds_raw.classes
@@ -220,18 +222,40 @@ def run_single_experiment(random_state, alpha):
     print("Prototypes built.")
     sys.stdout.flush()
 
+    def prototype_builder(HVs, labels, class_labels):
+        return build_prototypes_float(HVs, labels, class_labels, HVs.shape[1])
+
     # Conformal Prediction
     # We pass ID_LABELS so the class maps the ith prototype to the correct real label
     chdc  = ConformalHDC(protos_train, ID_LABELS, sim_measure="cosine", random_state=random_state)
+
+    jknife = JackknifePlusHDC(
+        ID_LABELS, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
+    fcp = FullConformalHDC(
+        ID_LABELS, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
     
     exp_results = []
     
     for stype in SCORE_TYPES:
         chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
+        jknife.fit(full_hvs, full_y, score_type=stype)
+        fcp.fit(full_hvs, full_y, score_type=stype)
         
         # 1. Set-Valued Prediction
-        for marginal in [True, False]:
-            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
+        for method, marginal, model in [
+            ("split_conformal", True, chdc),
+            ("split_conformal", False, chdc),
+            ("jackknife_plus", True, jknife),
+            ("full_conformal", True, fcp),
+        ]:
+            if model is chdc:
+                sets = model.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            else:
+                sets = model.set_valued_CP(test_hvs, alpha)
             sizes = [len(p) for p in sets]
             covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
             
@@ -244,12 +268,14 @@ def run_single_experiment(random_state, alpha):
 
             exp_results.append({
                 "exp": "set_valued",
+                "method": method,
                 "random_state": random_state,
                 "score_type": stype,
                 "alpha": alpha,
                 "marginal": marginal,
                 "set_cov": np.mean(covered),
                 "set_size": np.mean(sizes),
+                "lc_covs": lc_covs if lc_covs else 0.0,
                 "min_class_cov": lc_covs if lc_covs else 0.0,
                 # Placeholders
                 "point_acc": np.nan, "lc_accs":np.nan, "ood_auroc": np.nan

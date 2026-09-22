@@ -10,11 +10,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
+    from conformalHDC.jackknife import JackknifePlusHDC
+    from conformalHDC.fcp import FullConformalHDC
+    from data.load import load_har_data
 except ImportError:
     print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -96,17 +101,11 @@ def build_prototypes_np(hvs, labels, class_list, dim):
             protos[i] = np.sign(np.sum(hvs[idx], axis=0))
     return protos
 
-def load_har_data():
-    """ 
-    Expects data in ../data/UCI_HAR/
-    """
-    path = "../data/UCI_HAR/"
-    X_train = pd.read_csv(path + "train/X_train.txt", sep='\s+', header=None).values
-    y_train = pd.read_csv(path + "train/y_train.txt", header=None).values.flatten() - 1
-    X_test = pd.read_csv(path + "test/X_test.txt", sep='\s+', header=None).values
-    y_test = pd.read_csv(path + "test/y_test.txt", header=None).values.flatten() - 1
-    return np.vstack([X_train, X_test]), np.concatenate([y_train, y_test])
 
+def timed_call(func, *args, **kwargs):
+    start = time.perf_counter()
+    result = func(*args, **kwargs)
+    return result, time.perf_counter() - start
 
 ################======== Experiment Logic ========###############
 def run_single_experiment(random_state, alpha):
@@ -171,29 +170,77 @@ def run_single_experiment(random_state, alpha):
     protos_full = build_prototypes_np(full_hvs, full_y, LABELS_ID, DIM)
     print("Prototypes built.")
     sys.stdout.flush()
-
+    def prototype_builder(HVs, labels, class_labels):
+        return build_prototypes_np(HVs, labels, class_labels, HVs.shape[1])
+    # Conformal methods
     chdc = ConformalHDC(protos_train, LABELS_ID, sim_measure="cosine", random_state=random_state)
+
+    jknife = JackknifePlusHDC(
+        LABELS_ID, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
+    
+    fcp = FullConformalHDC(
+        LABELS_ID, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
+
+
     exp_results = []
     runtime_results = []
     
     for stype in SCORE_TYPES:
-        # Calibrate the set-valued model and measure overhead
-        start_calib = time.time()
-        chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
-        calib_overhead = time.time() - start_calib
+        # Calibrate the set-valued model and measure overhead 
+        _, split_calib_seconds = timed_call(
+            chdc.compute_calib_scores,
+            cal_hvs, cal_y, score_type=stype,
+        )
+        _, jk_seconds = timed_call(
+            jknife.fit,
+            full_hvs, full_y, score_type=stype,
+        )
+        _, fcp_seconds = timed_call(
+            fcp.fit,
+            full_hvs, full_y, score_type=stype,
+        )
+
+        preparation_seconds = {
+            "split_conformal": training_time + split_calib_seconds,
+            "jackknife_plus": jk_seconds,
+            "full_conformal": fcp_seconds,
+        }
 
         # 1. Set-Valued Prediction 
-        for marginal in [True, False]:
+        for method, marginal, model in [
+            ("split_conformal", True, chdc),
+            ("split_conformal", False, chdc),
+            ("jackknife_plus", True, jknife),
+            ("full_conformal", True, fcp),
+        ]:
+  
             # Measure Inference/Set-Generation Overhead
-            start_inf = time.time()
-            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
-            inference_overhead = time.time() - start_inf
+            kwargs = {"marginal": marginal} if model is chdc else {}
+            sets, inference_overhead = timed_call(
+                model.set_valued_CP, test_hvs, alpha, **kwargs,
+            )
+            # start_inf = time.time() 
+            # if model is chdc:
+            #     sets = model.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            # else:
+            #     sets = model.set_valued_CP(test_hvs, alpha)
+            # inference_overhead = time.time() - start_inf
+
             sizes = [len(p) for p in sets]
-            covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
-            lc_covs = [np.mean([covered[i] for i in np.where(test_y == lbl)[0]]) for lbl in LABELS_ID]
+            covered = np.array([
+                y in pset for y, pset in zip(test_y, sets)
+            ])
+            lc_covs = [
+                np.mean([covered[i] for i in np.where(test_y == lbl)[0]]) 
+                for lbl in LABELS_ID]
             
             exp_results.append({
                 "exp": "set_valued", 
+                "method": method,
                 "random_state": random_state, 
                 "score_type": stype,
                 "alpha": alpha,
@@ -206,12 +253,18 @@ def run_single_experiment(random_state, alpha):
             })
 
             runtime_results.append({
-            "exp": "set_valued", 
-            "random_state": random_state,
-            "score_type": stype,
-            "calib_overhead": calib_overhead,
-            "inference_overhead": inference_overhead,
-            "marginal": marginal,
+                "exp": "set_valued",
+                "method": method,
+                "random_state": random_state,
+                "score_type": stype,
+                "alpha": alpha,
+                "marginal": marginal,
+                "preparation_seconds": preparation_seconds[method],
+                "prediction_seconds": inference_overhead,
+                "total_seconds": (
+                    preparation_seconds[method] + inference_overhead
+                ),
+                "n_test": len(test_hvs),
             })
         
         # 2. Point-Valued Prediction
@@ -234,7 +287,7 @@ def run_single_experiment(random_state, alpha):
             "exp": "point_valued", 
             "random_state": random_state,
             "score_type": stype,
-            "calib_overhead": calib_overhead,
+            "calib_overhead": preparation_seconds['split_conformal'],
             "inference_overhead": inference_overhead,
             "marginal": np.nan
         })

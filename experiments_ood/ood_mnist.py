@@ -5,11 +5,13 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from torch.utils.data import DataLoader, Subset, ConcatDataset, random_split
-from torchvision import datasets, transforms
 from sklearn.metrics import roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from data.load import load_mnist_data
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
@@ -87,11 +89,7 @@ def run_single_experiment(random_state):
         torch.cuda.manual_seed_all(random_state)
     
     # Data Prep & Splitting
-    transform = transforms.ToTensor()
-    raw_ds = ConcatDataset([
-        datasets.MNIST(root='./data', train=True, transform=transform, download=True),
-        datasets.MNIST(root='./data', train=False, transform=transform, download=True)
-    ])
+    raw_ds = load_mnist_data()
     
     # Count labels
     all_targets = np.concatenate([d.targets.numpy() for d in raw_ds.datasets])

@@ -9,11 +9,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
+    from data.load import load_har_data
 except ImportError:
     print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -96,17 +99,7 @@ def build_prototypes_np(hvs, labels, class_list, dim):
             protos[i] = np.sign(np.sum(hvs[idx], axis=0))
     return protos
 
-def load_har_data():
-    """ 
-    Expects data in ../data/UCI_HAR/
-    """
-    path = "../data/UCI_HAR/"
-    X_train = pd.read_csv(path + "train/X_train.txt", sep='\s+', header=None).values
-    y_train = pd.read_csv(path + "train/y_train.txt", header=None).values.flatten() - 1
-    X_test = pd.read_csv(path + "test/X_test.txt", sep='\s+', header=None).values
-    y_test = pd.read_csv(path + "test/y_test.txt", header=None).values.flatten() - 1
-    return np.vstack([X_train, X_test]), np.concatenate([y_train, y_test])
-
+ 
 # Baseline Helper
 def get_cosine_similarities(X, prototypes):
     """Computes standard cosine similarity between queries and prototypes [-1, 1]."""

@@ -5,15 +5,19 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from torch.utils.data import DataLoader, Subset, ConcatDataset, random_split
-from torchvision import datasets, transforms
 from sklearn.metrics import roc_auc_score, roc_curve
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from data.load import load_mnist_data
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
+    from conformalHDC.jackknife import JackknifePlusHDC
+    from conformalHDC.fcp import FullConformalHDC
 except ImportError:
     print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -87,11 +91,7 @@ def run_single_experiment(random_state, alpha):
         torch.cuda.manual_seed_all(random_state)
     
     # Data Prep & Splitting
-    transform = transforms.ToTensor()
-    raw_ds = ConcatDataset([
-        datasets.MNIST(root='./data', train=True, transform=transform, download=True),
-        datasets.MNIST(root='./data', train=False, transform=transform, download=True)
-    ])
+    raw_ds = load_mnist_data()
     
     # Count labels
     all_targets = np.concatenate([d.targets.numpy() for d in raw_ds.datasets])
@@ -154,33 +154,68 @@ def run_single_experiment(random_state, alpha):
     print("Encoding complete.")
     sys.stdout.flush()
 
+    # Encoded development set: train + calibration
+    train_hvs, train_y = get_hvs_labels(ld_train, pos_hvs)
+    full_hvs = np.concatenate((train_hvs, calib_hvs), axis=0)
+    full_y = np.concatenate((train_y, calib_y))
+
     # Balance OOD to match Test size 
     min_len = min(len(ood_hvs), len(test_hvs))
     ood_hvs, ood_y = ood_hvs[:min_len], ood_y[:min_len]
-    
+
+
+    def prototype_builder(HVs, labels, class_labels):
+        # Match bipolar_sign: zero sums, including absent classes, become +1.
+        return np.stack([
+            np.where(HVs[labels == label].sum(axis=0) >= 0, 1, -1)
+            for label in class_labels
+        ]).astype(HVs.dtype)
+
+    # Conformal methods
     chdc = ConformalHDC(protos_train.cpu().numpy(), LABELS_ID, sim_measure="cosine", random_state=random_state) 
     
+    jknife = JackknifePlusHDC(
+        LABELS_ID, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
+
+    fcp = FullConformalHDC(
+        LABELS_ID, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
     exp_results = []
     
     # --- Experiment Loop per Score Type ---
     for stype in SCORE_TYPES:
         chdc.compute_calib_scores(calib_hvs, calib_y, score_type=stype)
-        
+        jknife.fit(full_hvs, full_y, score_type=stype) 
+        fcp.fit(full_hvs, full_y, score_type=stype)
+
         # 1. Set-Valued Prediction
-        for marginal in [True, False]:
-            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
+        for method, marginal, model in [
+            ("split_conformal", True, chdc),
+            ("split_conformal", False, chdc),
+            ("jackknife_plus", True, jknife),
+            ("full_conformal", True, fcp),
+        ]:
+            if model is chdc:
+                sets = model.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            else:
+                sets = model.set_valued_CP(test_hvs, alpha)
+  
             sizes = [len(p) for p in sets]
-            covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
-            
+            covered = np.array([
+                y in pset for y, pset in zip(test_y, sets)
+            ])
+             
             # Label conditional coverage
-            lc_covs = []
-            for lbl in LABELS_ID:
-                lbl_idx = np.where(test_y == lbl)[0]
-                if len(lbl_idx) > 0:
-                    lc_covs.append(np.mean([covered[i] for i in lbl_idx]))
-            
+            lc_covs = [
+                np.mean(covered[test_y == lbl])
+                for lbl in unique_labels if np.any(test_y == lbl)
+            ]
             exp_results.append({
                 "exp": "set_valued",
+                "method": method,
                 "random_state": random_state,
                 "score_type": stype,
                 "alpha": alpha,

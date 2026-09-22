@@ -5,12 +5,14 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from data.load import load_isolet_data
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
@@ -120,14 +122,7 @@ def run_single_experiment(random_state):
         torch.cuda.manual_seed_all(random_state)
     
     # Data Loading (Fetch once, split internally)
-    iso = fetch_openml('isolet', version=1, as_frame=False, parser='auto')
-    X = iso['data'].astype(np.float32)
-    y = iso['target']
-    
-    # Map labels 'A'..'Z' to 0..25
-    classes = sorted(np.unique(y).tolist())
-    label_to_id = {c: i for i, c in enumerate(classes)}
-    y_int = np.array([label_to_id[s] for s in y], dtype=np.int64)
+    X, y_int = load_isolet_data()
     
     # Quantize
     L_all = quantize_to_levels(X, LEVELS)

@@ -1,20 +1,22 @@
 import sys
-import pickle
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from tqdm import tqdm
-from dataclasses import dataclass
-from sklearn.model_selection import train_test_split
+from tqdm import tqdm 
 from sklearn.metrics import accuracy_score, roc_auc_score
 
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 try:
     from NeuroHDC.FHRR import *
-    from NeuroHDC.fn import *
+    from conformalHDC.z_exp.fn import *
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
+    from conformalHDC.jackknife import JackknifePlusHDC
+    from conformalHDC.fcp import FullConformalHDC
+    from data.load import load_rat_data
 except ImportError:
     print("Warning: NeuroHDC or conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -32,12 +34,14 @@ SLICING_WINDOW = 200
 STEP_BINS = 2
 
 
-def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path_ood):
-    # Data Loading (Function imported from NeuroHDC.fn)
-    splits = prep_loader_slicing(
+def run_single_experiment(random_state, rat_id, alpha, beta):
+
+    # Data Loading
+    splits, X_ood = load_rat_data(
         irat=rat_id, 
         split_ratio=(0.5, 0.4, 0.1), 
-        in_path=in_path_id,
+        training_window=TRAINING_WINDOW,
+        running_window=RUNNING_WINDOW,
         step_bins=STEP_BINS,
         slicing_window=SLICING_WINDOW,
         bin_size=BIN_SIZE,
@@ -48,10 +52,6 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
     X_cal, y_cal = splits.cal.X, splits.cal.y
     X_test, y_test = splits.test.X, splits.test.y
     
-    # Load OOD Data
-    with in_path_ood.open("rb") as f:
-        run_data = pickle.load(f)
-    X_ood = run_data[rat_id]['binned_spk']
     print(f"Data loaded.")
     sys.stdout.flush()
 
@@ -81,30 +81,62 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
 
     print("Prototypes built.")
     sys.stdout.flush()
+
+    # Conformal methods
+    chdc = ConformalHDC(
+        class_HVs=proto_train, class_labels=unique_labels, 
+        sim_measure="complex_cosine")
     
-    chdc = ConformalHDC(class_HVs=proto_train, class_labels=unique_labels, sim_measure="complex_cosine")
-    
+    def prototype_builder(HVs, labels, class_labels):
+        prototypes = rff.build_class_prototypes(HVs, labels)
+        # A leave-one-out subset can lose a class; use a zero prototype.
+        empty = np.zeros(HVs.shape[1], dtype=HVs.dtype)
+        return np.stack([prototypes.get(label, empty) for label in class_labels])
+
+    jknife = JackknifePlusHDC(
+        unique_labels, prototype_builder,
+        sim_measure="complex_cosine", random_state=chdc.random_state,
+    )
+
+    fcp = FullConformalHDC(
+        unique_labels, prototype_builder,
+        sim_measure="complex_cosine", random_state=chdc.random_state,
+    )
     exp_results = []
 
     # Experiment Loop per Score Type
     for stype in SCORE_TYPES:
+
         chdc.compute_calib_scores(enc_cal, y_cal, score_type=stype)
-        
+        jknife.fit(enc_full, y_full, score_type=stype) 
+        fcp.fit(enc_full, y_full, score_type=stype)
+
         # 1. Set-Valued Prediction
-        for marginal in [True, False]:
-            sets = chdc.set_valued_CP(enc_test, alpha, marginal=marginal)
+        for method, marginal, model in [
+            ("split_conformal", True, chdc),
+            ("split_conformal", False, chdc),
+            ("jackknife_plus", True, jknife),
+            ("full_conformal", True, fcp),
+        ]:
+            if model is chdc:
+                sets = model.set_valued_CP(enc_test, alpha, marginal=marginal)
+            else:
+                sets = model.set_valued_CP(enc_test, alpha)
+ 
             sizes = [len(p) for p in sets]
-            covered = [1 if y in p else 0 for y, p in zip(y_test, sets)]
+            covered = np.array([
+                y in pset for y, pset in zip(y_test, sets)
+            ])
 
             # Label conditional coverage
-            lc_covs = []
-            for lbl in unique_labels:
-                lbl_idx = np.where(y_test == lbl)[0]
-                if len(lbl_idx) > 0:
-                    lc_covs.append(np.mean([covered[i] for i in lbl_idx]))
+            lc_covs = [
+                np.mean(covered[y_test == lbl])
+                for lbl in unique_labels if np.any(y_test == lbl)
+            ]
 
             exp_results.append({
                 "exp": "set_valued",
+                "method": method,
                 "random_state": random_state,
                 "rat_id": rat_id,
                 "score_type": stype,
@@ -115,7 +147,9 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
                 "set_size": np.mean(sizes),
                 "lc_covs": lc_covs if lc_covs else 0.0,
                 # Placeholders
-                "point_acc": np.nan, "lc_accs":np.nan, "ood_auroc": np.nan
+                "point_acc": np.nan, 
+                "lc_accs":np.nan, 
+                "ood_auroc": np.nan
             })
         
         # 2. Point-Valued Prediction
@@ -164,7 +198,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta, in_path_id, in_path
     print("Finished running conformaHDC.")
     sys.stdout.flush()
 
-     # Baseline Vanilla HDC (Train Only)
+    # Baseline Vanilla HDC (Train Only)
     preds_vanilla = chdc.predict(enc_test)
     acc_vanilla = accuracy_score(y_test, preds_vanilla)
     lc_accs = eval_lc_accuracy(preds_vanilla, y_test, unique_labels)
@@ -224,10 +258,6 @@ if __name__ == "__main__":
     alpha_arg = float(sys.argv[3])
     beta_arg = float(sys.argv[4])
 
-    # Paths
-    path_id = Path("../data/rat") / f"odor_prep_{TRAINING_WINDOW}_{BIN_SIZE}.pickle"
-    path_ood = Path("../data/rat") / f"run_prep_{RUNNING_WINDOW}_{BIN_SIZE}.pickle"
-
     # Directory Setup
     out_dir = Path(f"./results/{EXP_NAME}")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -243,7 +273,7 @@ if __name__ == "__main__":
         current_state = REPETITIONS * (seed_arg - 1) + i
         
         try:
-            df_rep = run_single_experiment(current_state, rat_arg, alpha_arg, beta_arg, path_id, path_ood)
+            df_rep = run_single_experiment(current_state, rat_arg, alpha_arg, beta_arg)
             results_list.append(df_rep)
         except Exception as e:
             print(f"Error in state {current_state}: {e}")

@@ -1,8 +1,23 @@
-import numpy as np  
+import numpy as np
+import pandas as pd 
 import pickle 
 from dataclasses import dataclass 
 from sklearn.model_selection import train_test_split
+from .config import DATA_ROOT
 
+
+################======== UCI HAR ========################
+def load_har_data():
+    """Load UCI HAR, preserving train-then-test order and zero-based labels."""
+    path = DATA_ROOT / "UCI_HAR"
+    X_train = pd.read_csv(path / "train/X_train.txt", sep=r'\s+', header=None).values
+    y_train = pd.read_csv(path / "train/y_train.txt", header=None).values.flatten() - 1
+    X_test = pd.read_csv(path / "test/X_test.txt", sep=r'\s+', header=None).values
+    y_test = pd.read_csv(path / "test/y_test.txt", header=None).values.flatten() - 1
+    return np.vstack([X_train, X_test]), np.concatenate([y_train, y_test])
+
+
+################======== Rat ========################
 # --------------------
 # Data Structures
 # --------------------
@@ -206,7 +221,7 @@ def prep_loader_slicing(irat, split_ratio, in_path,
     with in_path.open("rb") as f:
         odor_data = pickle.load(f)
 
-    X = odor_data[irat]['binned_spk'] # (n_trail, n_bin, n_neuron)
+    X = odor_data[irat]['binned_spk'] # (n_trial, n_bin, n_neuron)
     y = odor_data[irat]['y']          # (n_trial, )
     trial = odor_data[irat]['trial_id'] # (n_trial, )
     
@@ -232,86 +247,61 @@ def prep_loader_slicing(irat, split_ratio, in_path,
     return splits
 
 
+def prep_ood_rat(in_path_ood,rat_id):
+    # Load OOD Data
+    with in_path_ood.open("rb") as f:
+        run_data = pickle.load(f)
+    X_ood = run_data[rat_id]['binned_spk']
+    return X_ood
 
 
-#=====================visual tools========================
-import matplotlib.pyplot as plt
-def plot_conf_mat(cm):
-    '''visualize confusion matrix, row is actual, col is predicted'''
+def load_mnist_data():
+    """Return concatenated MNIST train/test datasets with the original transform."""
+    from torch.utils.data import ConcatDataset
+    from torchvision import datasets, transforms
 
-    plt.figure(figsize=(5, 4))
-    plt.imshow(cm, interpolation="nearest")
-    plt.colorbar()
-
-    # annotate with 2 digits (integers if cm is int, else 2 decimals)
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            txt = f"{cm[i, j]:.2f}" if np.issubdtype(cm.dtype, np.floating) else f"{cm[i, j]:02d}"
-            plt.text(j, i, txt, ha="center", va="center")
-
-    plt.xticks(range(cm.shape[1]))
-    plt.yticks(range(cm.shape[0]))
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
-    plt.tight_layout()
-    plt.title('Averaged confusion matrix over 5 rats')
-    plt.show()
-
-def sim_matrix(H):
-    # H complex (n,D), assumes unit magnitude-ish
-    return (H @ np.conj(H).T).real / H.shape[1]
-
-def plot_similarity_blocks(H, y, title="Cosine similarity matrix of class prototypes"):
-    order = np.argsort(y)
-    S = sim_matrix(H[order])
-    plt.figure(figsize=(5, 4))
-    plt.imshow(S, aspect="auto")
-    plt.title(title)
-    plt.colorbar() 
-    plt.title(title)
- 
-    for i in range(S.shape[0]):
-        for j in range(S.shape[1]):
-            plt.text(j, i,f'{S[i, j]:.2f}', ha="center", va="center")
-    plt.xlabel('Odor class')
-    plt.ylabel('Odor class')
-    plt.show()
+    root = str(DATA_ROOT)
+    transform = transforms.ToTensor()
+    return ConcatDataset([
+        datasets.MNIST(root=root, train=True, transform=transform, download=True),
+        datasets.MNIST(root=root, train=False, transform=transform, download=True),
+    ])
 
 
-def check_dist(X,y):
+def load_isolet_data():
+    """Return float32 features and sorted, zero-based int64 class labels."""
+    from sklearn.datasets import fetch_openml
 
-    # Flatten time (treat the whole trial as one long vector for this check)
-    X_flat = X.reshape(X.shape[0], -1) 
+    iso = fetch_openml('isolet', version=1, as_frame=False, parser='auto',
+                       data_home=str(DATA_ROOT / "openml"))
+    X = iso['data'].astype(np.float32)
+    y = iso['target']
+    classes = sorted(np.unique(y).tolist())
+    label_to_id = {c: i for i, c in enumerate(classes)}
+    y_int = np.array([label_to_id[s] for s in y], dtype=np.int64)
+    return X, y_int
 
-    # Calculate distances
-    from sklearn.metrics.pairwise import euclidean_distances
-    dists = euclidean_distances(X_flat)
 
-    # Mask for Same vs Diff
-    same_mask = y[:, None] == y[None, :]
-    np.fill_diagonal(same_mask, False)
-    diff_mask = ~same_mask
+def load_languages_data(transform):
+    """Return language train/test datasets using the experiment's transform."""
+    from torchhd.datasets import EuropeanLanguages
 
-    avg_dist_same = dists[same_mask].mean()
-    avg_dist_diff = dists[diff_mask].mean()
+    root = str(DATA_ROOT)
+    return (
+        EuropeanLanguages(root, train=True, transform=transform, download=True),
+        EuropeanLanguages(root, train=False, transform=transform, download=True),
+    )
 
-    print(f"Raw Euclidean Dist | Same: {avg_dist_same:.2f} | Diff: {avg_dist_diff:.2f}")
 
-def check_beta_health(model, X, y, beta):
-    # Encode Data, assuming W_neurons and Time_Base are already generated in model
-    H = model.encode_all(model.W, X, model.TB, beta)
-    
-    # Compute similarity matrix (Real part of Hermitian product)
-    gram = np.real(H @ H.conj().T) / model.D
-    
-    # Mask for Same Class vs Diff Class
-    same_class_mask = y[:, None] == y[None, :]
-    np.fill_diagonal(same_class_mask, False) # Ignore self-similarity
-    
-    diff_class_mask = ~same_class_mask
-    
-    # Compute Averages
-    avg_intra = gram[same_class_mask].mean()
-    avg_inter = gram[diff_class_mask].mean()
-    
-    print(f"Beta: {beta:.2f} | within : {avg_intra:.3f} | between : {avg_inter:.3f} | Delta: {avg_intra - avg_inter:.3f}")
+def load_rat_data(irat, split_ratio, training_window, running_window,
+                  bin_size=25, step_bins=2, slicing_window=200, seed=0):
+    """Resolve rat filenames centrally and reuse the existing preparation."""
+    root = DATA_ROOT / "rat"
+    splits = prep_loader_slicing(
+        irat, split_ratio,
+        root / f"odor_prep_{training_window}_{bin_size}.pickle",
+        step_bins=step_bins, slicing_window=slicing_window,
+        bin_size=bin_size, seed=seed,
+    )
+    X_ood = prep_ood_rat(root / f"run_prep_{running_window}_{bin_size}.pickle", irat)
+    return splits, X_ood

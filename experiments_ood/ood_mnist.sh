@@ -1,12 +1,6 @@
 #!/bin/bash
+set -e
 
-# Initialize Conda
-eval "$(conda shell.bash hook)"
-
-# module load slurm
-
-# Activate the correct environment
-conda activate hdc
-
-# Run the python script with the passed seed_group_id and alpha
-python3 ood_mnist.py $1
+# Run from this experiment directory.
+source ../data/config.sh
+python3 ood_mnist.py "$@"

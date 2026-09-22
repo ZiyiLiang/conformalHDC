@@ -5,16 +5,20 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from data.load import load_isolet_data
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
     from conformalHDC.utils import *
+    from conformalHDC.jackknife import JackknifePlusHDC
+    from conformalHDC.fcp import FullConformalHDC
 except ImportError:
     print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -113,14 +117,7 @@ def run_single_experiment(random_state, alpha):
         torch.cuda.manual_seed_all(random_state)
     
     # Data Loading (Fetch once, split internally)
-    iso = fetch_openml('isolet', version=1, as_frame=False, parser='auto')
-    X = iso['data'].astype(np.float32)
-    y = iso['target']
-    
-    # Map labels 'A'..'Z' to 0..25
-    classes = sorted(np.unique(y).tolist())
-    label_to_id = {c: i for i, c in enumerate(classes)}
-    y_int = np.array([label_to_id[s] for s in y], dtype=np.int64)
+    X, y_int = load_isolet_data()
     
     # Quantize
     L_all = quantize_to_levels(X, LEVELS)
@@ -179,31 +176,56 @@ def run_single_experiment(random_state, alpha):
     protos_full = build_prototypes_np(full_hvs, full_y, ID_CLASSES, DIM)
     print("Prototypes built.")
     sys.stdout.flush()
+    def prototype_builder(HVs, labels, class_labels):
+            return build_prototypes_np(HVs, labels, class_labels, HVs.shape[1])
 
     # Initialize Models
     chdc = ConformalHDC(protos_train, ID_CLASSES, sim_measure="cosine", random_state=random_state)
 
+    jknife = JackknifePlusHDC(
+        ID_CLASSES, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
+
+    fcp = FullConformalHDC(
+        ID_CLASSES, prototype_builder,
+        sim_measure="cosine", random_state=chdc.random_state,
+    )
+    
     exp_results = []
     
     for stype in SCORE_TYPES:
+
         # Calibrate the set-valued model
         chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
+        jknife.fit(full_hvs, full_y, score_type=stype) 
+        fcp.fit(full_hvs, full_y, score_type=stype)
         
         # 1. Set-Valued Prediction 
-        for marginal in [True, False]:
-            sets = chdc.set_valued_CP(test_hvs, alpha, marginal=marginal)
+        for method, marginal, model in [
+            ("split_conformal", True, chdc),
+            ("split_conformal", False, chdc),
+            ("jackknife_plus", True, jknife),
+            ("full_conformal", True, fcp),
+        ]:
+            if model is chdc:
+                sets = model.set_valued_CP(test_hvs, alpha, marginal=marginal)
+            else:
+                sets = model.set_valued_CP(test_hvs, alpha)
+     
             sizes = [len(p) for p in sets]
-            covered = [1 if y in p else 0 for y, p in zip(test_y, sets)]
-            
+            covered = np.array([
+                y in pset for y, pset in zip(test_y, sets)
+            ])
+                
             # Label conditional coverage
-            lc_covs = []
-            for lbl in ID_CLASSES:
-                lbl_idx = np.where(test_y == lbl)[0]
-                if len(lbl_idx) > 0:
-                    lc_covs.append(np.mean([covered[i] for i in lbl_idx]))
-            
+            lc_covs = [
+                np.mean(covered[test_y == lbl])
+                for lbl in ID_CLASSES if np.any(test_y == lbl)
+            ]
             exp_results.append({
                 "exp": "set_valued",
+                "method": method,
                 "random_state": random_state,
                 "score_type": stype,
                 "alpha": alpha,

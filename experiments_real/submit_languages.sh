@@ -10,7 +10,7 @@ ALPHA_LIST=(0.01)
 
 # Slurm parameters
 EXPNAME="languages"
-MEMO=10G                             
+MEMO=24G                             
 TIME=00-04:00:00                     
 CORE=1                              
 

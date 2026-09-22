@@ -129,6 +129,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+chdc/
 
 # Spyder project settings
 .spyderproject
@@ -187,3 +188,8 @@ paper/
 
 # zoeys edit
 z_exp
+# Keep shared loading code while ignoring dataset contents.
+!/data/
+/data/*
+!/data/*.py
+!/data/config.sh

@@ -6,7 +6,6 @@ import torch.nn.functional as F
 import torch.utils.data as data
 from torch.utils.data import ConcatDataset, Subset, DataLoader, random_split
 from torchhd import functional, embeddings
-from torchhd.datasets import EuropeanLanguages as Languages
 import re
 import numpy as np
 import pandas as pd
@@ -15,7 +14,10 @@ from pathlib import Path
 from sklearn.metrics import roc_auc_score
 
 # --- Library Imports ---
-sys.path.append('../') 
+# Allow imports from the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+from data.load import load_languages_data
 try:
     from conformalHDC.models import *
     from conformalHDC.methods import *
@@ -83,7 +85,7 @@ class LanguageEncoder(nn.Module):
         symbols = self.symbol(x_ids)          # [B, T, D]
         hv = functional.ngrams(symbols, n=3)  # [B, D]
         # Bipolarize sample hypervectors
-        hv = functional.hard_quantize(hv)     
+        hv = functional.normalize(hv)#functional.hard_quantize(hv)     
         return hv
 
 @torch.no_grad()
@@ -135,9 +137,7 @@ def run_single_experiment(random_state):
         torch.cuda.manual_seed_all(random_state)
     
     # Data Loading
-    data_root = "./data"
-    train_ds_raw = Languages(data_root, train=True, transform=transform, download=True)
-    test_ds_raw  = Languages(data_root, train=False, transform=transform, download=True)
+    train_ds_raw, test_ds_raw = load_languages_data(transform)
     
     # Map Strings to Integer Labels
     all_class_names = train_ds_raw.classes
