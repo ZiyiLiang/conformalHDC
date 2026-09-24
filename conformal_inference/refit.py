@@ -1,10 +1,11 @@
 """Reference jackknife+ and full conformal prediction that refit every model.
 
-Works with any prototype_builder but is slow: jackknife+ fits one classifier per
-held-out development sample and compares its test scores with the score it assigns
-to that sample (Algorithm 2); full conformal fits one classifier per test sample and
-candidate label on the augmented data and scores all n + 1 observations.
-conformalHDC.fast gives the same sets for class-sum prototypes without refitting.
+Works with any prototype_builder but is slow: 
+    - jackknife+ fits one classifier per held-out development sample and 
+        compares its test scores with the score it assigns to that sample
+    - full conformal fits one classifier per test sample and candidate label
+      on the augmented data and scores all n + 1 observations.
+conformal_inference.fast gives the same sets for class-sum prototypes without refitting.
 """
 import numpy as np
 
@@ -62,10 +63,11 @@ class JackknifePlusHDC():
         ''' Rescore held-out samples without rebuilding the leave-one-out models. '''
         if self.loo_models is None:
             raise RuntimeError("Fit the development set first! (Call function fit)")
+        draws = np.random.RandomState(self.random_state).uniform(size=self.n_development)
         scores = np.array([
             model._compute_nonconformity_scores(
                 self.dev_HVs[i:i + 1], self.dev_targets[i:i + 1],
-                score_type=score_type, **kwargs,
+                score_type=score_type, U=draws[i:i + 1], **kwargs,
             )[0]
             for i, model in enumerate(self.loo_models)
         ]) 
@@ -84,10 +86,14 @@ class JackknifePlusHDC():
         ''' 
         if self.loo_models is None:
             raise RuntimeError("Fit the development set first! (Call function fit)")
+        test_HVs = np.atleast_2d(test_HVs)
+        draws = np.random.RandomState(self.random_state).uniform(
+            size=self.n_development + len(test_HVs),
+        )[self.n_development:]
         counts = np.zeros((len(test_HVs), len(self.class_labels)), dtype=int)
         for model, heldout_score in zip(self.loo_models, self.loo_scores):
             counts += model._class_scores(
-                model._sim_matrix(test_HVs), self.score_type, **self.score_kwargs,
+                model._sim_matrix(test_HVs), self.score_type, U=draws, **self.score_kwargs,
             ) > heldout_score
 
         threshold = np.ceil((1 - alpha) * (self.n_development + 1))
@@ -102,6 +108,7 @@ def jackknife_all_scores(template, H, y, X, alpha, score_types):
         s: np.zeros((len(X), len(labels)), dtype=np.int64)
         for s in score_types
     }
+    draws = np.random.RandomState(template.random_state).uniform(size=len(H) + len(X))
     keep = np.ones(len(H), dtype=bool)
 
     for i in range(len(H)):
@@ -113,9 +120,9 @@ def jackknife_all_scores(template, H, y, X, alpha, score_types):
 
         for s in score_types:
             held_score = model._scores_from_sims(
-                held_sims, targets[i:i + 1], score_type=s,
+                held_sims, targets[i:i + 1], score_type=s, U=draws[i:i + 1],
             )[0]
-            counts[s] += model._class_scores(test_sims, s) > held_score
+            counts[s] += model._class_scores(test_sims, s, U=draws[len(H):]) > held_score
 
     threshold = np.ceil((1 - alpha) * (len(H) + 1))
     return {
@@ -198,35 +205,3 @@ class FullConformalHDC():
                 if scores[-1] <= Q:
                     psets[i].append(label)
         return psets
-
-def full_conformal_all_scores(template, H, y, X, alpha, score_types):
-    """Reuse each augmented model and its similarities across score types."""
-    labels = template.class_labels
-    aug = np.empty(
-        (len(H) + 1, H.shape[1]),
-        dtype=np.result_type(H.dtype, X.dtype),
-    )
-    aug[:-1] = H
-    aug_y = np.empty(len(H) + 1, dtype=object)
-    aug_y[:-1] = y
-    targets = np.empty(len(H) + 1, dtype=int)
-    targets[:-1] = [template.label_to_idx[label] for label in y]
-    rank = int(np.ceil((1 - alpha) * len(aug))) - 1
-    result = {s: [[] for _ in X] for s in score_types}
-
-    for i, x in enumerate(X):
-        aug[-1] = x
-        for c, label in enumerate(labels):
-            aug_y[-1], targets[-1] = label, c
-            prototypes = template.prototype_builder(aug, aug_y, labels)
-            model = ConformalHDC(
-                prototypes, labels, sim_measure=template.sim_measure,
-                random_state=template.random_state, verbose=template.verbose,
-            )
-            sims = model._sim_matrix(aug)
-            for s in score_types:
-                scores = model._scores_from_sims(sims, targets, score_type=s)
-                if scores[-1] <= np.partition(scores, rank)[rank]:
-                    result[s][i].append(label)
-
-    return result

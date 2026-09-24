@@ -9,9 +9,11 @@ Rules ("bipolar", "ternary", "normalized"):
     ternary     np.sign of the class sum, a zero sum staying 0 (HAR, ISOLET)
     normalized  class sum scaled to unit norm (Languages)
 """
+import multiprocessing
 from collections import defaultdict
 
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 from .methods import ConformalHDC, sets_from_mask
 
@@ -173,14 +175,24 @@ def chunks(items, size):
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
+# Engine shared with forked worker processes (copy-on-write, so nothing large is copied).
+_ENGINE = None
+
+
+def _run_unit(task):
+    method, args = task
+    return getattr(_ENGINE, method)(*args)
+
+
 class FastConformal:
     """Jackknife+ and full-conformal prediction sets without refitting any model.
 
     H, y: development set (train + calibration); X: test hypervectors.
+    n_jobs: worker processes for the independent models; results do not depend on it.
     Input arrays must not be mutated while this object is in use.
     """
 
-    def __init__(self, H, y, X, labels, rule, random_state=0, chunk_size=128):
+    def __init__(self, H, y, X, labels, rule, random_state=0, chunk_size=128, n_jobs=1):
         if H.ndim != 2 or X.ndim != 2 or not len(H) or X.shape[1] != H.shape[1]:
             raise ValueError("Development data must be nonempty with matching dimensions.")
         if len(y) != len(H):
@@ -191,6 +203,22 @@ class FastConformal:
         self.prototypes = self.rule.prototypes
         self.model = ConformalHDC(self.prototypes, self.labels, random_state=random_state)
         self.chunk_size = chunk_size
+        self.n_jobs = n_jobs
+
+    def _map(self, method, arg_list):
+        """[self.method(*args) for args in arg_list], on n_jobs forked workers when n_jobs > 1."""
+        if self.n_jobs <= 1 or len(arg_list) < 2:
+            return [getattr(self, method)(*args) for args in arg_list]
+        global _ENGINE
+        _ENGINE = self
+        try:
+            # One BLAS thread per worker, so n_jobs workers use n_jobs cores.
+            with multiprocessing.get_context("fork").Pool(
+                self.n_jobs, initializer=threadpool_limits, initargs=(1,),
+            ) as pool:
+                return pool.map(_run_unit, [(method, args) for args in arg_list])
+        finally:
+            _ENGINE = None
 
     def _sims(self, which, rows, change):
         """Similarity rows of `which` ("dev"/"test") rows under the model `change`."""
@@ -219,34 +247,49 @@ class FastConformal:
         """Jackknife+ sets; model i leaves out development sample i."""
         n, (n_test, n_classes) = len(self.targets), self.rule.sims["test"].shape
         counts = {s: np.zeros((n_test, n_classes), dtype=np.int64) for s in score_types}
-        # A held-out score is a one-row call, so every held-out score uses the first draw.
-        held_draw = self.model._uniform_draws(1)[0]
-        for batch in self._batches(self._groups(self.rule.leave_one_out(i) for i in range(n))):
+        # One draw per development observation, retained across all models.
+        held_draw = self.model._uniform_draws(n)
+        batches = self._batches(self._groups(self.rule.leave_one_out(i) for i in range(n)))
+        n_parts = 4 * self.n_jobs if self.n_jobs > 1 else 1  # interleaved shares balance the classes
+        for part in self._map("_jackknife_counts", [
+            (batches[i::n_parts], score_types, held_draw) for i in range(n_parts)
+        ]):
+            for s in score_types:
+                counts[s] += part[s]
+        threshold = np.ceil((1 - alpha) * (n + 1))
+        return {s: sets_from_mask(counts[s] < threshold, self.labels) for s in score_types}
+
+    def _jackknife_counts(self, batches, score_types, held_draw):
+        """Per score type, how many held-out scores each candidate score exceeds."""
+        n_test, n_classes = self.rule.sims["test"].shape
+        counts = {s: np.zeros((n_test, n_classes), dtype=np.int64) for s in score_types}
+        for batch in batches:
             rows = np.concatenate([r for _, r in batch])
             owner = np.repeat(np.arange(len(batch)), [len(r) for _, r in batch])
             held = np.vstack([self._sims("dev", r, change) for change, r in batch])
             for s in score_types:
                 held_scores = self.model._scores_from_sims(
-                    held, self.targets[rows], score_type=s, U=np.full(len(rows), held_draw),
+                    held, self.targets[rows], score_type=s, U=held_draw[rows],
                 )
                 for k, candidate in self._candidate_scores(batch, s):
                     if len(batch) == 1:  # one model: count by binary search
                         counts[s][:, k] += np.searchsorted(np.sort(held_scores), candidate[:, 0], side="left")
                     else:
                         counts[s][:, k] += (candidate[:, owner] > held_scores).sum(axis=1)
-        threshold = np.ceil((1 - alpha) * (n + 1))
-        return {s: sets_from_mask(counts[s] < threshold, self.labels) for s in score_types}
+        return counts
 
     def _candidate_scores(self, batch, score_type):
         """(k, (n_test, len(batch)) scores of every test sample for candidate class k)."""
         n_test, n_classes = self.rule.sims["test"].shape
         if not self.rule.batched:
             (change, _), = batch
-            scores = self.model._class_scores(self._sims("test", slice(None), change), score_type)
+            scores = self.model._class_scores(self._sims("test", slice(None), change), score_type,
+                U=self.model._uniform_draws(n_test, offset=len(self.targets)),
+            )
             return [(k, scores[:, [k]]) for k in range(n_classes)]
         c = batch[0][0][0]
         new = np.column_stack([self.rule.column(change, "test", slice(None)) for change, _ in batch])
-        draws = self.model._uniform_draws(n_test)
+        draws = self.model._uniform_draws(n_test, offset=len(self.targets))
         return [(k, self.model._column_update_scores(
             self.rule.sims["test"], np.full(n_test, k), c, new, score_type, U=draws,
         )) for k in range(n_classes)]
@@ -266,19 +309,29 @@ class FastConformal:
         keep = {s: np.full((n_test, n_classes), rank >= n) for s in score_types}
         if rank >= n:
             return {s: sets_from_mask(keep[s], self.labels) for s in score_types}
-        draws = self.model._uniform_draws(n + 1)
-        for c in range(n_classes):
-            groups = self._groups(self.rule.augment(j, c) for j in range(n_test))
-            for batch in self._batches(groups):
-                thresholds = self._dev_thresholds(c, [change for change, _ in batch], score_types, draws[:n], rank)
-                for b, (change, tests) in enumerate(batch):
-                    last = self._sims("test", tests, change)
-                    for s in score_types:
-                        last_scores = self.model._scores_from_sims(
-                            last, np.full(len(tests), c), score_type=s, U=np.full(len(tests), draws[n]),
-                        )
-                        keep[s][tests, c] = last_scores <= thresholds[s][b]
+        units = [
+            (c, batch, score_types, rank)
+            for c in range(n_classes)
+            for batch in self._batches(self._groups(self.rule.augment(j, c) for j in range(n_test)))
+        ]
+        for (c, *_), results in zip(units, self._map("_full_conformal_keep", units)):
+            for tests, kept in results:
+                for s in score_types:
+                    keep[s][tests, c] = kept[s]
         return {s: sets_from_mask(keep[s], self.labels) for s in score_types}
+
+    def _full_conformal_keep(self, c, batch, score_types, rank):
+        """[(tests, {score type: kept})] for the models of one same-class batch."""
+        n = len(self.targets)
+        draws = self.model._uniform_draws(n + 1)  # seeded, so identical in every unit
+        thresholds = self._dev_thresholds(c, [change for change, _ in batch], score_types, draws[:n], rank)
+        results = []
+        for b, (change, tests) in enumerate(batch):
+            last = self._sims("test", tests, change)
+            results.append((tests, {s: self.model._scores_from_sims(
+                last, np.full(len(tests), c), score_type=s, U=np.full(len(tests), draws[n]),
+            ) <= thresholds[s][b] for s in score_types}))
+        return results
 
     def _dev_thresholds(self, c, changes, score_types, draws, rank):
         """{score type: rank-th smallest development score under each model}."""

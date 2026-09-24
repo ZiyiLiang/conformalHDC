@@ -84,11 +84,11 @@ class ConformalHDC():
         return np.asarray(sim_matrix, dtype=float)
 
 
-    def _uniform_draws(self, n):
-        ''' Seeded uniforms that randomize inverse-quantile scores for exact coverage.
-            Every call reuses the same draws, so row i always receives the same U.
+    def _uniform_draws(self, n, offset=0):
+        ''' Seeded per-observation uniforms. Offset separates development and test rows.
+            Reusing a row across candidate models retains its assigned draw.
         '''
-        return np.random.RandomState(self.random_state).uniform(0, 1, size=n)
+        return np.random.RandomState(self.random_state).uniform(0, 1, size=offset + n)[offset:]
 
 
     @staticmethod
@@ -99,7 +99,7 @@ class ConformalHDC():
         exp_sims = np.exp(sim_matrix - sim_matrix.max(axis=1, keepdims=True))
         pi_hat = exp_sims / exp_sims.sum(axis=1, keepdims=True)
 
-        indices_sorted = np.argsort(pi_hat, axis=1)
+        indices_sorted = np.argsort(pi_hat, axis=1, kind="stable")
         cumulative_probs = np.empty_like(pi_hat)
         np.put_along_axis(
             cumulative_probs, indices_sorted,
@@ -190,7 +190,7 @@ class ConformalHDC():
             Scores m models at once that differ from sim_matrix only in column c:
             new_column has shape (n, m), and column a of the (n, m) result equals
             _scores_from_sims on the matrix with column c set to new_column[:, a],
-            up to rounding (inverse_quantile ranks tied probabilities above the target).
+            up to rounding; tied probabilities follow canonical class order.
         '''
         sims = np.asarray(sim_matrix, dtype=float)
         targets = np.asarray(canonical_targets).astype(int)
@@ -203,9 +203,11 @@ class ConformalHDC():
             sim_all_classes = sims.sum(axis=1)[:, None] - sims[:, [c]] + new_column
             return self._score_formula(sim_true_class, sim_all_classes, score_type, **kwargs)
 
-        # Unnormalized softmax mass sorted at or below the target, updated without re-sorting.
+        # Use the ordinary scorer for tied rows so probability ties (including
+        # those introduced by floating-point softmax) follow precisely the same
+        # canonical ordering. The algebraic update handles untied rows in batches.
         exps, new_exps = np.exp(sims), np.exp(new_column)
-        exps[:, c] = 0  # column c enters through new_exps only
+        exps[:, c] = 0
         target_exps = np.where(is_c, new_exps, exps[rows, targets][:, None])
         below = (np.where(exps < exps[rows, targets][:, None], exps, 0).sum(axis=1)[:, None]
                  + np.where(new_exps < target_exps, new_exps, 0))
@@ -216,7 +218,28 @@ class ConformalHDC():
         if U is None:
             U = self._uniform_draws(len(targets))
         total = exps.sum(axis=1)[:, None] + new_exps
-        return (-(below + target_exps) + np.asarray(U)[:, None] * target_exps) / total
+        result = (-(below + target_exps) + np.asarray(U)[:, None] * target_exps) / total
+        # Only rows with a potential tie need a full softmax and sort. Near ties
+        # are included because exponentiation can round unequal inputs equally.
+        base_target = sims[rows, targets]
+        other_columns = np.arange(sims.shape[1]) != c
+        base_ties = (np.isclose(sims, base_target[:, None], rtol=0, atol=1e-14)
+                     & (np.arange(sims.shape[1]) != targets[:, None])
+                     & other_columns).any(axis=1)
+        for b in range(new_column.shape[1]):
+            tied = base_ties | np.isclose(base_target, new_column[:, b], rtol=0, atol=1e-14)
+            changed_ties = np.isclose(
+                sims[rows_c], new_column[rows_c, b, None], rtol=0, atol=1e-14,
+            )
+            changed_ties[:, c] = False
+            tied[rows_c] = changed_ties.any(axis=1)
+            if tied.any():
+                updated = sims[tied].copy()
+                updated[:, c] = new_column[tied, b]
+                result[tied, b] = self._scores_from_sims(
+                    updated, targets[tied], score_type, U=np.asarray(U)[tied], **kwargs,
+                )
+        return result
 
 
     def _compute_nonconformity_scores(self, HVs, canonical_targets,
@@ -237,12 +260,22 @@ class ConformalHDC():
         return False
 
 
+    @staticmethod
+    def _conformal_quantile(scores, alpha):
+        """Finite-sample order statistic, including the implicit +infinity score."""
+        if not 0 <= alpha < 1:
+            raise ValueError("alpha must lie in [0, 1).")
+        scores = np.asarray(scores)
+        rank = int(np.ceil((len(scores) + 1) * (1 - alpha)))
+        return np.inf if rank > len(scores) else np.partition(scores, rank - 1)[rank - 1]
+
     def _thresholds(self, alpha, marginal):
-        ''' Score threshold of every class at significance level alpha. '''
+        """Score threshold of every class at significance level alpha."""
         if marginal:
-            self.quantile = np.quantile(self.calib_scores, (self.n_calib+1)*(1-alpha)/self.n_calib)
+            self.quantile = self._conformal_quantile(self.calib_scores, alpha)
             return np.full(len(self.canonical_indices), self.quantile)
-        self.quantiles = [np.quantile(scores, (n+1)*(1-alpha)/n) for scores, n in zip(self.calib_scores_per_label, self.n_calib_per_label)]
+        self.quantiles = [self._conformal_quantile(scores, alpha)
+                          for scores in self.calib_scores_per_label]
         return np.array(self.quantiles)
 
 
@@ -357,21 +390,3 @@ class ConformalHDC():
         best_indices = np.argmax(sims, axis=1)
         return [self.class_labels[idx] for idx in best_indices]
 
-
-class CachedConformalHDC(ConformalHDC):
-    """Cache fixed-model similarities for one repetition.
-
-    Registered arrays and class prototypes must remain unchanged until the
-    cache is replaced. Retain array references so identity checks stay valid.
-    """
-
-    def cache_similarities(self, *arrays):
-        compute = super()._sim_matrix
-        self._cached_sims = [(x, compute(x)) for x in arrays]
-        return self
-
-    def _sim_matrix(self, HVs):
-        for original, sims in getattr(self, "_cached_sims", ()):
-            if HVs is original:
-                return sims
-        return super()._sim_matrix(HVs)

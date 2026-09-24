@@ -1,22 +1,29 @@
 #!/bin/bash
 
-# --- QUICK TEST LIST ---
+# 1 seed w/ 4 repetitions takes 2 mins, peaks memory <6GB
+
+# # --- QUICK TEST LIST ---
 # SEED_LIST=(1)
 # ALPHA_LIST=(0.1)
 
-# --- FULL EXPERIMENT LIST ---
-SEED_LIST=($(seq 1 10))
+# # --- FULL EXPERIMENT LIST ---
+SEED_LIST=($(seq 1 25))
 ALPHA_LIST=(0.05 0.1)
 
 EXPNAME="mnist"
 
 # Slurm parameters
 MEMO=8G                             
-TIME=00-02:00:00                    
+TIME=00-04:00:00                    
 CORE=1                              
 
 # Assemble order
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
+
+# Thred limit
+export OPENBLAS_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 # Directories
 LOGS="logs/"$EXPNAME

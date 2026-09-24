@@ -19,9 +19,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from data.load import load_languages_data
 try:
-    from conformalHDC.models import *
-    from conformalHDC.methods import *
-    from conformalHDC.utils import *
+    from conformal_inference.models import *
+    from conformal_inference.methods import *
+    from conformal_inference.utils import *
 except ImportError:
     print("Warning: conformalHDC modules not found. Ensure '../' is in path.")
 

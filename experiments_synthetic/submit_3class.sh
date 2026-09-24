@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # --- QUICK TEST LIST ---
-# SEED_LIST=(1)
-# ALPHA_LIST=(0.1)
-
-# --- FULL EXPERIMENT LIST ---
-SEED_LIST=($(seq 1 10))
+SEED_LIST=(1)
 ALPHA_LIST=(0.1)
+
+# # --- FULL EXPERIME NT LIST ---
+# SEED_LIST=($(seq 1 10))
+# ALPHA_LIST=(0.1)
 
 # Experiment Name (Used for folder naming)
 EXPNAME="3class"

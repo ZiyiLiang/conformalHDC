@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# --- QUICK TEST LIST ---
+# one seed, 4 repetition, takes 2 mins, < 2GB
+# # --- QUICK TEST LIST ---
 # SEED_LIST=(1)
 # ALPHA_LIST=(0.1)
 

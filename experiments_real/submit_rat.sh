@@ -1,12 +1,14 @@
 #!/bin/bash
 
+# One rat for 25 seeds takes 8 mins, peaks memory < 1GB
+
 # --- QUICK TEST LIST ---
 # SEED_LIST=(1)
 # RAT_LIST=(0)
 # ALPHA_LIST=(0.2)
 
-# --- FULL EXPERIMENT LIST ---
-SEED_LIST=(1 2 3 4 5)
+# # --- FULL EXPERIMENT LIST ---
+SEED_LIST=($(seq 1 25))
 RAT_LIST=$(seq 0 4)      
 #ALPHA_LIST=(0.1 0.2) 
 ALPHA_LIST=(0.2) 
@@ -14,12 +16,17 @@ BETA_LIST=(0.3)
 
 # Slurm parameters (CPU Only)
 EXPNAME="odor_decoding"
-MEMO=4G                           
-TIME=00-02:00:00                   
+MEMO=2G                           
+TIME=00-04:00:00                   
 CORE=1                              
 
 # Assemble order
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
+
+# Thred limit
+export OPENBLAS_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 # Directories
 LOGS="logs/"$EXPNAME

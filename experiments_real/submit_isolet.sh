@@ -1,21 +1,27 @@
 #!/bin/bash
 
-# --- QUICK TEST LIST ---
-#SEED_LIST=(1)
-#ALPHA_LIST=(0.05)
+# one seed, 4 rep takes 10 mins , 2 G
+# # --- QUICK TEST LIST ---
+# SEED_LIST=(1)
+# ALPHA_LIST=(0.05)
 
 # --- EXPERIMENT LIST ---
-SEED_LIST=($(seq 1 10))
+SEED_LIST=($(seq 1 25))
 ALPHA_LIST=(0.05 0.02)
 
 # Slurm parameters
 EXPNAME="isolet"
 MEMO=8G                            
-TIME=00-04:00:00                 
-CORE=1                        
+TIME=00-06:00:00                 
+CORE=4                     
 
 # Assemble order
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
+
+# Thread limit: match the requested cores
+export OPENBLAS_NUM_THREADS=$CORE
+export OMP_NUM_THREADS=$CORE
+export MKL_NUM_THREADS=$CORE
 
 # Directories
 LOGS="logs/"$EXPNAME

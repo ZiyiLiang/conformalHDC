@@ -8,12 +8,18 @@ library(tidyverse)
 library(xtable)
 library(stringr)
 library(gridExtra)
+source("~/ConformalHDC/conformalHDC/experiments_real/plot/common.R")
+
+
+RESULT_ROOT = "~/ConformalHDC/conformalHDC/experiments_real/results"
+OUT_ROOT  = '~/ConformalHDC/conformalHDC/experiments_real/results/table'
+
 
 #-------------------------------------------------------------------------------
 #                           Isolet Exp
 #-------------------------------------------------------------------------------
 # Set your results directory here
-setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+setwd(RESULT_ROOT)
 results_dir <- "./isolet/" 
 
 # Pattern matches: seedX_alphaY.csv
@@ -31,15 +37,11 @@ if (length(files) == 0) {
 #------------------
 # Table Generation 
 #------------------
-format_metric <- function(val_mean, val_se) {
-  if (is.na(val_mean)) return("-")
-  sprintf("%.3f (%.3f)", val_mean, val_se)
-}
 
 create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
   
   # 1. Filter Data by Alpha (keep NA alphas for Vanilla baselines if needed)
-  dat <- df %>% 
+  dat <- df %>%  
     filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
     filter(score_type != "vanilla_train")
   
@@ -76,56 +78,53 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
   #------------------------------------------------
   
   # --- A. Set-Valued Metrics (Marginal Only) ---
-  set_metrics <- dat %>%
-    filter(exp == "set_valued", marginal == TRUE) %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      m_cov_u = mean(set_cov, na.rm=TRUE), 
-      m_cov_se = sd(set_cov, na.rm=TRUE) / sqrt(n),
-      m_siz_u = mean(set_size, na.rm=TRUE), 
-      m_siz_se = sd(set_size, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
+  # spilt conformal
+  set_metrics <- dat %>% 
+    filter(method == "split_conformal") %>% 
+    summary_set_val()
+  
+  # jk
+  set_metrics_jk <- dat %>%
+    filter(method == "jackknife_plus") %>% 
+    summary_set_val()
+  
+  # fcp
+  set_metrics_fcp <- dat %>% 
+    filter(method == "full_conformal") %>% 
+    summary_set_val()
   
   # --- B. Point-Valued Metrics ---
   point_metrics <- dat %>%
-    filter(exp == "point_valued") %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      acc_u = mean(point_acc, na.rm=TRUE), 
-      acc_se = sd(point_acc, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
+    summary_point_val()
+
   
   # --- C. OOD Metrics ---
   ood_metrics <- dat %>%
-    filter(exp == "ood", marginal == TRUE) %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      ood_u = mean(ood_auroc, na.rm=TRUE), 
-      ood_se = sd(ood_auroc, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
+    summary_ood_val()
+
   
   # --- D. Merge & Format ---
   base <- tibble(score_type = unique(dat$score_type))
   
   joined <- base %>%
-    left_join(set_metrics, by="score_type") %>%
-    left_join(point_metrics, by="score_type") %>%
-    left_join(ood_metrics, by="score_type")
-  
+    left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
+    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
+    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
+    left_join(point_metrics, by = "score_type") %>%
+    left_join(ood_metrics,   by = "score_type")
+
   formatted <- joined %>%
-    mutate(
-      `Cov` = mapply(format_metric, m_cov_u, m_cov_se),
-      `Size` = mapply(format_metric, m_siz_u, m_siz_se),
-      `Accuracy` = mapply(format_metric, acc_u, acc_se),
-      `AUROC` = mapply(format_metric, ood_u, ood_se)
+    transmute(
+      score_type = score_type,
+      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
+      Size_std = fmt(std_m_siz_u, std_m_siz_se),
+      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
+      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
+      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
+      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
+      Accuracy      = fmt(acc_u,     acc_se),
+      AUROC      = fmt(ood_u,     ood_se)
     )
-  
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
   formatted <- formatted %>%
     mutate(Method = case_when(
@@ -140,57 +139,38 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
     filter(Method != "vanilla_train") %>%
     # Use exact same order as 3-class
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
-                                      "Similarity", "CHDC-ratio", "CHDC-discount"))) %>%
-    select(Method, Cov, Size, Accuracy, AUROC)
+                                      "Similarity", "CHDC-ratio", "CHDC-discount"))) 
+  formatted_standard = formatted%>%
+    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+  formatted_set_compare = formatted%>%
+    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
-  # --- F. Construct LaTeX Header ---
+  
+  # --- F. Construct and save to LaTeX---
   # Structure: Method | Cov Size | Acc | OOD |
-  align_str <- "l|l|cc|c|c|"
-  
-  additor <- list()
-  additor$pos <- list(0)
-  additor$command <- paste0(
-    "\\hline\n",
-    " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
-    "\\cline{2-5}\n",
-    "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
+
+  export_latex_table(
+    df = formatted_standard,
+    align_str = "l|l|cc|c|c|",
+    header_cmd = header_standard,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("isolet_table_alpha", target_alpha, ".tex") else "isolet_table.tex"
   )
-  
-  # --- G. Save/Print ---
-  # floating = FALSE ensures we only get the tabular environment
-  ltx <- xtable(formatted, align = align_str)
-  
-  if (!is.null(save_dir)) {
-    if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
-    filename <- file.path(save_dir, paste0("isolet_table_alpha", target_alpha, ".tex"))
-    
-    print(ltx, file = filename, 
-          floating = FALSE,          # No \begin{table} wrapper
-          include.rownames = FALSE, 
-          include.colnames = FALSE, 
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = c(nrow(formatted)),
-          comment = FALSE)
-    
-    cat(paste("Saved tabular to:", filename, "\n"))
-  } else {
-    print(ltx, 
-          floating = FALSE,
-          include.rownames = FALSE, 
-          include.colnames = FALSE,
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = c(nrow(formatted)),
-          comment = FALSE)
-  }
+ 
+  # Structure: Method | Cov Size | Cov Size | Cov Size
+  export_latex_table(
+    df = formatted_set_compare,
+    align_str = "l|l|cc|cc|cc|",
+    header_cmd = header_set_compare,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
+  )
 }
 
 #------------------
 # Save Table 
 #------------------
-table_dir <- '../../results/tables/isolet/'
+table_dir <- paste0(OUT_ROOT, "/isolet")
 
 create_isolet_table(isolet_data, target_alpha = 0.05, save_dir = table_dir)
 create_isolet_table(isolet_data, target_alpha = 0.02, save_dir = table_dir)
@@ -199,12 +179,11 @@ create_isolet_table(isolet_data, target_alpha = 0.02, save_dir = table_dir)
 
 
 
-
 #-------------------------------------------------------------------------------
 #                           MNIST Exp
 #-------------------------------------------------------------------------------
 # Set your results directory here
-setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+setwd(RESULT_ROOT)
 results_dir <- "./mnist/" 
 
 # Pattern matches: seedX_alphaY.csv
@@ -222,10 +201,6 @@ if (length(files) == 0) {
 #------------------
 # Table Generation 
 #------------------
-format_metric <- function(val_mean, val_se) {
-  if (is.na(val_mean)) return("-")
-  sprintf("%.3f (%.3f)", val_mean, val_se)
-}
 
 create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   
@@ -265,55 +240,53 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   # Aggregation (Grouped by Score Type)
   #------------------------------------------------
   
-  # --- A. Set-Valued Metrics (Marginal Only) ---
+  # --- A. Set-Valued Metrics (Marginal Only) --- 
+  # spilt conformal
   set_metrics <- dat %>%
-    filter(exp == "set_valued", marginal == TRUE) %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      m_cov_u = mean(set_cov, na.rm=TRUE), 
-      m_cov_se = sd(set_cov, na.rm=TRUE) / sqrt(n),
-      m_siz_u = mean(set_size, na.rm=TRUE), 
-      m_siz_se = sd(set_size, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
-  
+    filter(method == "split_conformal") %>%
+    summary_set_val()
+
+  # jk
+  set_metrics_jk <- dat %>%
+    filter(method == "jackknife_plus") %>%
+    summary_set_val()
+
+  # fcp
+  set_metrics_fcp <- dat %>%
+    filter(method == "full_conformal") %>%
+    summary_set_val()
+
   # --- B. Point-Valued Metrics ---
   point_metrics <- dat %>%
-    filter(exp == "point_valued") %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      acc_u = mean(point_acc, na.rm=TRUE), 
-      acc_se = sd(point_acc, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
-  
+    summary_point_val()
+
+
   # --- C. OOD Metrics ---
   ood_metrics <- dat %>%
-    filter(exp == "ood", marginal == TRUE) %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      ood_u = mean(ood_auroc, na.rm=TRUE), 
-      ood_se = sd(ood_auroc, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
-  
+    summary_ood_val()
+
   # --- D. Merge & Format ---
   base <- tibble(score_type = unique(dat$score_type))
   
-  joined <- base %>%
-    left_join(set_metrics, by="score_type") %>%
-    left_join(point_metrics, by="score_type") %>%
-    left_join(ood_metrics, by="score_type")
   
+  joined <- base %>%
+    left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
+    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
+    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
+    left_join(point_metrics, by = "score_type") %>%
+    left_join(ood_metrics,   by = "score_type")
+
   formatted <- joined %>%
-    mutate(
-      `Cov` = mapply(format_metric, m_cov_u, m_cov_se),
-      `Size` = mapply(format_metric, m_siz_u, m_siz_se),
-      `Accuracy` = mapply(format_metric, acc_u, acc_se),
-      `AUROC` = mapply(format_metric, ood_u, ood_se)
+    transmute(
+      score_type = score_type,
+      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
+      Size_std = fmt(std_m_siz_u, std_m_siz_se),
+      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
+      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
+      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
+      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
+      Accuracy      = fmt(acc_u,     acc_se),
+      AUROC      = fmt(ood_u,     ood_se)
     )
   
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
@@ -328,59 +301,39 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
       TRUE ~ score_type
     )) %>%
     filter(Method != "vanilla_train") %>%
-    # Use exact same order as 3-class/Isolet
-    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
-                                      "Similarity", "CHDC-ratio", "CHDC-discount"))) %>%
-    select(Method, Cov, Size, Accuracy, AUROC)
-  
-  # --- F. Construct LaTeX Header ---
+    # Use exact same order as 3-class
+    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
+                                      "Similarity", "CHDC-ratio", "CHDC-discount")))
+  formatted_standard = formatted%>%
+    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+  formatted_set_compare = formatted%>%
+    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
+
+  # --- F. Construct and save to LaTeX---
   # Structure: Method | Cov Size | Acc | OOD |
-  # Align: 'll' (rownames + Method) | 'cc' | 'c' | 'c' |
-  align_str <- "l|l|cc|c|c|"
-  
-  additor <- list()
-  additor$pos <- list(0)
-  additor$command <- paste0(
-    "\\hline\n",
-    " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
-    "\\cline{2-5}\n",
-    "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
+
+  export_latex_table(
+    df = formatted_standard,
+    align_str = "l|l|cc|c|c|",
+    header_cmd = header_standard,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("mnist_table_alpha", target_alpha, ".tex") else "mnist_table.tex"
   )
-  
-  # --- G. Save/Print ---
-  ltx <- xtable(formatted, align = align_str)
-  
-  if (!is.null(save_dir)) {
-    if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
-    filename <- file.path(save_dir, paste0("mnist_table_alpha", target_alpha, ".tex"))
-    
-    print(ltx, file = filename, 
-          floating = FALSE,          
-          include.rownames = FALSE, 
-          include.colnames = FALSE, 
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = c(nrow(formatted)),
-          comment = FALSE)
-    
-    cat(paste("Saved tabular to:", filename, "\n"))
-  } else {
-    print(ltx, 
-          floating = FALSE,
-          include.rownames = FALSE, 
-          include.colnames = FALSE,
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = c(nrow(formatted)),
-          comment = FALSE)
-  }
+
+  # Structure: Method | Cov Size | Cov Size | Cov Size
+  export_latex_table(
+    df = formatted_set_compare,
+    align_str = "l|l|cc|cc|cc|",
+    header_cmd = header_set_compare,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("mnist_set_compare_table_alpha", target_alpha, ".tex") else "mnist_set_compare_table.tex"
+  )
 }
 
 #------------------
 # Save Table 
 #------------------
-table_dir <- '../../results/tables/mnist/'
+table_dir <- paste0(OUT_ROOT,'/mnist/')
 
 # Generate for typical Alphas
 create_mnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
@@ -391,7 +344,7 @@ create_mnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
 #                         Languages Exp
 #-------------------------------------------------------------------------------
 # Set your results directory here
-setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+setwd(RESULT_ROOT)
 results_dir <- "./languages/" 
 
 # Pattern matches: seedX_alphaY.csv
@@ -574,7 +527,7 @@ create_languages_table(languages_data, target_alpha = 0.01, save_dir = table_dir
 #                           UCI HAR Exp
 #-------------------------------------------------------------------------------
 # Set your results directory here
-setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+setwd(RESULT_ROOT)
 results_dir <- "./uci_har/" 
 
 # Pattern matches: seedX_alphaY.csv
@@ -592,12 +545,7 @@ if (length(files) == 0) {
 
 #------------------
 # Table Generation 
-#------------------
-format_metric <- function(val_mean, val_se) {
-  if (is.na(val_mean)) return("-")
-  sprintf("%.3f (%.3f)", val_mean, val_se)
-}
-
+#------------------ 
 create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -637,56 +585,53 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   #------------------------------------------------
   
   # --- A. Set-Valued Metrics (Marginal Only) ---
+  # spilt conformal
   set_metrics <- dat %>%
-    filter(exp == "set_valued", marginal == TRUE) %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      m_cov_u = mean(set_cov, na.rm=TRUE), 
-      m_cov_se = sd(set_cov, na.rm=TRUE) / sqrt(n),
-      m_siz_u = mean(set_size, na.rm=TRUE), 
-      m_siz_se = sd(set_size, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
+    filter(method == "split_conformal") %>%
+    summary_set_val()
+  
+  # jk
+  set_metrics_jk <- dat %>%
+    filter(method == "jackknife_plus") %>%
+    summary_set_val()
+  
+  # fcp
+  set_metrics_fcp <- dat %>%
+    filter(method == "full_conformal") %>%
+    summary_set_val()
   
   # --- B. Point-Valued Metrics ---
   point_metrics <- dat %>%
-    filter(exp == "point_valued") %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      acc_u = mean(point_acc, na.rm=TRUE), 
-      acc_se = sd(point_acc, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
+    summary_point_val()
+  
   
   # --- C. OOD Metrics ---
   ood_metrics <- dat %>%
-    filter(exp == "ood", marginal == TRUE) %>%
-    group_by(score_type) %>%
-    summarise(
-      n = n(),
-      ood_u = mean(ood_auroc, na.rm=TRUE), 
-      ood_se = sd(ood_auroc, na.rm=TRUE) / sqrt(n),
-      .groups = "drop"
-    )
+    summary_ood_val()
+ 
   
   # --- D. Merge & Format ---
   base <- tibble(score_type = unique(dat$score_type))
   
   joined <- base %>%
-    left_join(set_metrics, by="score_type") %>%
-    left_join(point_metrics, by="score_type") %>%
-    left_join(ood_metrics, by="score_type")
+    left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
+    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
+    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
+    left_join(point_metrics, by = "score_type") %>%
+    left_join(ood_metrics,   by = "score_type")
   
   formatted <- joined %>%
-    mutate(
-      `Cov` = mapply(format_metric, m_cov_u, m_cov_se),
-      `Size` = mapply(format_metric, m_siz_u, m_siz_se),
-      `Accuracy` = mapply(format_metric, acc_u, acc_se),
-      `AUROC` = mapply(format_metric, ood_u, ood_se)
+    transmute(
+      score_type = score_type,
+      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
+      Size_std = fmt(std_m_siz_u, std_m_siz_se),
+      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
+      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
+      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
+      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
+      Accuracy      = fmt(acc_u,     acc_se),
+      AUROC      = fmt(ood_u,     ood_se)
     )
-  
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
   formatted <- formatted %>%
     mutate(Method = case_when(
@@ -699,56 +644,37 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
       TRUE ~ score_type
     )) %>%
     filter(Method != "vanilla_train") %>%
-    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
-                                      "Similarity", "CHDC-ratio", "CHDC-discount"))) %>%
-    select(Method, Cov, Size, Accuracy, AUROC)
+    # Use exact same order as 3-class
+    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
+                                      "Similarity", "CHDC-ratio", "CHDC-discount")))
+  formatted_standard = formatted%>%
+    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+  formatted_set_compare = formatted%>%
+    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
   # --- F. Construct LaTeX Header ---
-  align_str <- "l|l|cc|c|c|"
   
-  additor <- list()
-  additor$pos <- list(0)
-  additor$command <- paste0(
-    "\\hline\n",
-    " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
-    "\\cline{2-5}\n",
-    "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
+  export_latex_table(
+    df = formatted_standard,
+    align_str = "l|l|cc|c|c|",
+    header_cmd = header_standard,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("uci_har_table_alpha", target_alpha, ".tex") else "uci_har_table.tex"
   )
   
-  # --- G. Save/Print ---
-  ltx <- xtable(formatted, align = align_str)
-  
-  if (!is.null(save_dir)) {
-    if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
-    filename <- file.path(save_dir, paste0("uci_har_table_alpha", target_alpha, ".tex"))
-    
-    print(ltx, file = filename, 
-          floating = FALSE,          
-          include.rownames = FALSE, 
-          include.colnames = FALSE, 
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = c(nrow(formatted)),
-          comment = FALSE)
-    
-    cat(paste("Saved tabular to:", filename, "\n"))
-  } else {
-    print(ltx, 
-          floating = FALSE,
-          include.rownames = FALSE, 
-          include.colnames = FALSE,
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = c(nrow(formatted)),
-          comment = FALSE)
-  }
-}
-
+  # Structure: Method | Cov Size | Cov Size | Cov Size
+  export_latex_table(
+    df = formatted_set_compare,
+    align_str = "l|l|cc|cc|cc|",
+    header_cmd = header_set_compare,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("uci_har_set_compare_table_alpha", target_alpha, ".tex") else "uci_har_set_compare_table.tex"
+  )
+} 
 #------------------
 # Save Table 
 #------------------
-table_dir <- '../../results/tables/uci_har/'
+table_dir <- paste0(OUT_ROOT,'/uci_har/')
 
 # Generate for typical Alphas
 create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
@@ -761,7 +687,7 @@ create_uci_har_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
 #                           Runtime Summary Table (UCI HAR)
 #-------------------------------------------------------------------------------
 # Set your results directory here
-setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+setwd(RESULT_ROOT)
 results_dir <- "./uci_har/" 
 
 files_rt <- list.files(path = results_dir, pattern = ".*_runtime\\.csv", 
@@ -1006,7 +932,7 @@ create_combined_table(
 #                           Odor Decoding Exp
 #-------------------------------------------------------------------------------
 # Set your results directory here
-setwd("C:/Users/liang/Documents/GitHub/conformalHDC/experiments_real/results/")
+setwd(RESULT_ROOT)
 results_dir <- "./odor_decoding/" 
 
 # Pattern matches: ratX_seedY_alphaZ_betaW.csv
@@ -1023,11 +949,7 @@ if (length(files) == 0) {
 
 #------------------
 # Table Generation 
-#------------------
-format_metric <- function(val_mean, val_se) {
-  if (is.na(val_mean)) return("-")
-  sprintf("%.3f (%.3f)", val_mean, val_se)
-}
+#------------------ 
 
 create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
   
@@ -1061,43 +983,50 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
     bind_rows(hdc_as_sets)
   
   # Aggregation
+  
+  # --- A. Set-Valued Metrics (Marginal Only) ---
+  # spilt conformal
   set_metrics <- dat %>%
-    filter(exp == "set_valued", marginal == TRUE) %>%
-    group_by(Rat_Full, score_type) %>%
-    summarise(
-      n = n(),
-      cov_u = mean(set_cov, na.rm=TRUE), cov_se = sd(set_cov, na.rm=TRUE)/sqrt(n),
-      siz_u = mean(set_size, na.rm=TRUE), siz_se = sd(set_size, na.rm=TRUE)/sqrt(n),
-      .groups = "drop"
-    )
+    filter(method == "split_conformal") %>%
+    summary_set_val(Rat_Full)
   
-  point_metrics <- dat %>%
-    filter(exp == "point_valued") %>%
-    group_by(Rat_Full, score_type) %>%
-    summarise(
-      n = n(),
-      acc_u = mean(point_acc, na.rm=TRUE), acc_se = sd(point_acc, na.rm=TRUE)/sqrt(n),
-      .groups = "drop"
-    )
+  # jk
+  set_metrics_jk <- dat %>%
+    filter(method == "jackknife_plus") %>%
+    summary_set_val(Rat_Full)
   
-  ood_metrics <- dat %>%
-    filter(exp == "ood", marginal == TRUE) %>%
-    group_by(Rat_Full, score_type) %>%
-    summarise(
-      n = n(),
-      ood_u = mean(ood_auroc, na.rm=TRUE), ood_se = sd(ood_auroc, na.rm=TRUE)/sqrt(n),
-      .groups = "drop"
-    )
+  # fcp
+  set_metrics_fcp <- dat %>%
+    filter(method == "full_conformal") %>%
+    summary_set_val(Rat_Full)
+
+  # --- B. Point-Valued Metrics ---
+  point_metrics <- dat %>% 
+    summary_point_val(Rat_Full) 
+  # --- C. OOD Metrics ---
+  ood_metrics <- dat %>% 
+    summary_ood_val(Rat_Full)
   
-  # 5. Merge & Format
-  formatted <- set_metrics %>%
-    left_join(point_metrics, by=c("Rat_Full", "score_type")) %>%
-    left_join(ood_metrics, by=c("Rat_Full", "score_type")) %>%
-    mutate(
-      Cov = mapply(format_metric, cov_u, cov_se),
-      Size = mapply(format_metric, siz_u, siz_se),
-      Accuracy = mapply(format_metric, acc_u, acc_se),
-      AUROC = mapply(format_metric, ood_u, ood_se),
+  # --- D. Merge & Format --- 
+  formatted <- set_metrics %>% 
+    rename_with(~ paste0("std_", .), -c(score_type,Rat_Full)) %>% 
+    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -c(score_type,Rat_Full)), by = c("Rat_Full", "score_type")) %>%
+    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -c(score_type,Rat_Full)), by = c("Rat_Full", "score_type")) %>%
+    left_join(point_metrics, by = c("Rat_Full", "score_type")) %>%
+    left_join(ood_metrics,   by = c("Rat_Full", "score_type"))%>%
+    transmute(
+      score_type = score_type,
+      rat = Rat_Full,
+      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
+      Size_std = fmt(std_m_siz_u, std_m_siz_se),
+      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
+      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
+      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
+      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
+      Accuracy      = fmt(acc_u,     acc_se),
+      AUROC      = fmt(ood_u,     ood_se)
+    ) %>% 
+    mutate( 
       Method = case_when(
         score_type == "vanilla_full"  ~ "HDC",
         score_type == "vanilla_train" ~ "HDC (train)",
@@ -1110,57 +1039,65 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
       )
     ) %>%
     # Use exact reordering logic
-    arrange(factor(Rat_Full, levels = rat_names), 
+    arrange(factor(rat, levels = rat_names), 
             factor(Method, levels = c("HDC (train)", "HDC", "Inv. quantile", 
                                       "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
-  
-  final_df <- formatted %>%
-    group_by(Rat_Full) %>%
-    mutate(Rat_Display = if_else(
+  formatted_standard = formatted %>%
+    select(rat,Method, Cov_std, Size_std, Accuracy, AUROC) %>%
+    group_by(rat) %>%
+    mutate(rat = if_else(
       row_number() == 1, 
-      paste0("\\multirow{", n(), "}{*}{", Rat_Full, "}"), 
+      paste0("\\multirow{", n(), "}{*}{", rat, "}"), 
       ""
-    )) %>%
-    ungroup() %>%
-    select(Rat_Display, Method, Cov, Size, Accuracy, AUROC) %>%
-    rename(Rat = Rat_Display)
+    )) 
+  formatted_set_compare = formatted %>%
+    select(rat,Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)%>%
+    group_by(rat) %>%
+    mutate(rat = if_else(
+      row_number() == 1, 
+      paste0("\\multirow{", n(), "}{*}{", rat, "}"), 
+      ""
+    )) 
   
-  # Align: Rat | Method | Cov Size | Acc | OOD
-  align_str <- "l|ll|cc|c|c|"
   
-  # Grouping lines between rats (similar to sigma groups)
-  rat_rle <- rle(as.character(formatted$Rat_Full))
-  hlines <- cumsum(rat_rle$lengths)
   
-  # Header Construction: Move "Rat" and "Method" to the second row
-  additor <- list(pos = list(0), command = paste0(
+  # --- F. Construct and save to LaTeX---
+  # # Align: Rat | Method | Cov Size | Acc | OOD
+  std_header_cmd <- paste0(
     "\\hline\n",
     " & & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
     "\\cline{3-6}\n",
     "\\textbf{Rat} & \\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
     "\\hline\n"
-  ))
+  )
+   
+  export_latex_table(
+    df         = formatted_standard,
+    align_str  =  "l|ll|cc|c|c|",
+    header_cmd = std_header_cmd,
+    save_dir   = save_dir,
+    group_col  = "rat",
+    file_name  = paste0("odor_decoding_full_alpha", target_alpha, ".tex")
+  )
+ 
   
-  ltx <- xtable(final_df, align = align_str)
-  
-  if (!is.null(save_dir)) {
-    if (!dir.exists(save_dir)) dir.create(save_dir, recursive = TRUE)
-    filename <- file.path(save_dir, paste0("odor_decoding_full_alpha", target_alpha, ".tex"))
-    
-    print(ltx, file = filename, 
-          floating = FALSE, 
-          include.rownames = FALSE, 
-          include.colnames = FALSE, 
-          sanitize.text.function = function(x){x}, 
-          add.to.row = additor, 
-          hline.after = hlines, 
-          comment = FALSE)
-    cat(paste("Saved full table to:", filename, "\n"))
-  } else {
-    print(ltx, floating = FALSE, include.rownames = FALSE, include.colnames = FALSE,
-          sanitize.text.function = function(x){x}, add.to.row = additor, 
-          hline.after = hlines, comment = FALSE)
-  }
+  #   for Standard, Jackknife, and FCP groups
+  comp_header_cmd <- paste0(
+    "\\hline\n",
+    " & & \\multicolumn{2}{c|}{\\textbf{Standard}} & \\multicolumn{2}{c|}{\\textbf{Jackknife}} & \\multicolumn{2}{c|}{\\textbf{FCP}} \\\\\n",
+    "\\cline{3-8}\n",
+    "\\textbf{Rat} & \\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Coverage} & \\textbf{Size} \\\\\n",
+    "\\hline\n"
+  )
+   
+  export_latex_table(
+    df          = formatted_set_compare,
+    align_str   =  "l|ll|cc|cc|cc|",
+    header_cmd  = comp_header_cmd,
+    save_dir    = save_dir,
+    group_col  = "rat",
+    file_name   = paste0("odor_decoding_set_valued_comparison_alpha", target_alpha, ".tex")
+  ) 
 }
 
 
@@ -1188,37 +1125,52 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
   
   # Aggregate Means
   summary_stats <- dat %>%
-    group_by(Rat_Full, score_type) %>%
+    mutate(method = replace_na(method, 'split_conformal')) %>% 
+    group_by(Rat_Full, score_type, method) %>%
     summarise(
       Cov = mean(set_cov[exp == "set_valued" & marginal == TRUE], na.rm=TRUE),
       Size = mean(set_size[exp == "set_valued" & marginal == TRUE], na.rm=TRUE),
       AUC = mean(ood_auroc[exp == "ood" & marginal == TRUE], na.rm=TRUE),
       .groups = "drop"
     ) %>%
-    mutate(Method = case_when(
-      score_type == "vanilla_full"  ~ "HDC",
-      score_type == "inverse_quantile" ~ "Inv. quantile",
-      score_type == "penalized" ~ "Penalized",
-      score_type == "sim" ~ "Similarity",
-      score_type == "ratio" ~ "CHDC-ratio",
-      score_type == "discount" ~ "CHDC-discount",
-      TRUE ~ score_type
-    ),
-    across(c(Cov, Size, AUC), ~ ifelse(is.na(.), "-", sprintf("%.3f", .)))
+    rename(refit_method = method ) %>% 
+    mutate( 
+      Method = case_when(
+        score_type == "vanilla_full"  ~ "HDC",
+        score_type == "inverse_quantile" ~ "Inv. quantile",
+        score_type == "penalized" ~ "Penalized",
+        score_type == "sim" ~ "Similarity",
+        score_type == "ratio" ~ "CHDC-ratio",
+        score_type == "discount" ~ "CHDC-discount",
+        TRUE ~ score_type
+      ),
+      across(c(Cov, Size, AUC), ~ ifelse(is.na(.), "-", sprintf("%.3f", .)))
     ) %>%
     filter(score_type != "vanilla_train") # Omit HDC (train)
   
   # Pivot wider so each rat has its own set of 3 columns
-  wide_df <- summary_stats %>%
+  ## set comparsion
+  
+  wide_comp_df = summary_stats %>% 
+    select(Method, refit_method, Rat_Full, Cov, Size) %>%
+    pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size), names_glue = "{Rat_Full}_{.value}") %>%
+    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
+
+  ## original 
+  wide_std_df <- summary_stats %>%
+    filter(refit_method=='split_conformal') %>% 
     select(Method, Rat_Full, Cov, Size, AUC) %>%
     pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size, AUC), names_glue = "{Rat_Full}_{.value}") %>%
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
   
   # Reorder columns to group by Rat: [Method, Rat1_Cov, Rat1_Size, Rat1_AUC, Rat2_Cov...]
   col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size", "_AUC"), paste0))))
-  wide_df <- wide_df[, col_order]
+  wide_std_df <- wide_std_df[, col_order]
+  col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size"), paste0))))
+  wide_comp_df = wide_comp_df[, col_order]
+  # TODO ADD LATEX FORMAT for wide_comp_df
   
-  # LaTeX Formatting
+  # LaTeX Formatting original
   align_str <- "ll|ccc|ccc|ccc|ccc|ccc|"
   
   # Custom Header Construction
@@ -1230,7 +1182,7 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
     "\\hline\n"
   )
   
-  ltx <- xtable(wide_df, align = align_str)
+  ltx <- xtable(wide_std_df, align = align_str)
   
   print(ltx, 
         file = if(!is.null(save_dir)) file.path(save_dir, "odor_decoding_summary_table.tex") else "",
@@ -1239,15 +1191,17 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
         include.colnames = FALSE, 
         sanitize.text.function = function(x) x,
         add.to.row = list(pos = list(0), command = header_cmd),
-        hline.after = c(nrow(wide_df)),
+        hline.after = c(nrow(wide_std_df)),
         comment = FALSE)
+  
+  
 }
 
 
 #------------------
 # Execution
 #------------------
-table_dir <- '../../results/tables/odor_decoding/'
+table_dir <- '~/ConformalHDC/conformalHDC/experiments_real/results/table/odor_decoding'
 
 create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 
