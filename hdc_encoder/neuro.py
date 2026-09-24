@@ -31,7 +31,7 @@ class RFF:
     
     def gen_time_base(self):
         theta = self.rng.uniform(0, 2*np.pi, size=(self.D,))
-        return np.exp(1j * theta)
+        return np.exp(np.multiply(1j, theta, dtype=np.complex64))
  
     def encode_trial(self, W_neurons, X_trial, Time_Base, beta = 0.2):
         """
@@ -47,10 +47,10 @@ class RFF:
         projections = W_neurons @ X_trial.T
 
         # 2. Exponentiate
-        hv_neurons = np.exp(1j * beta * projections) # (D, T)
+        hv_neurons = np.exp(np.multiply(1j, beta * projections, dtype=np.complex64)) # (D, T)
 
  
-        hv_sum = np.zeros(self.D, dtype=np.complex128)
+        hv_sum = np.zeros(self.D, dtype=np.complex64)
         
         for ti in range(X_trial.shape[0]): 
 
@@ -65,7 +65,7 @@ class RFF:
     def encode_all(self, W_neurons, X, Time_Base,beta):
         # X: (trials, timebins, neurons)
         trials = X.shape[0]
-        H = np.empty((trials, self.D), dtype=np.complex128)
+        H = np.empty((trials, self.D), dtype=np.complex64)
         for i in range(trials): 
             H[i] = self.encode_trial(W_neurons, X[i], Time_Base,beta)
         return H
@@ -109,7 +109,9 @@ class RFF:
 
         label = np.unique(y)
         if weights is None:
-            weights = np.ones(trian_hvs.shape[0])
+            weights = np.ones(trian_hvs.shape[0], dtype=np.float32)
+        else:
+            weights = np.asarray(weights, dtype=np.float32)
         codebook_1pass = {}
 
         for il in label:
