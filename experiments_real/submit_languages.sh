@@ -16,7 +16,7 @@ TIME=00-04:00:00
 CORE=8                           
 
 # Assemble submission command
-ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --gres=gpu:1 --partition=biodatascience.p"
+ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
 
 # Thread limit: match the requested cores
 export OPENBLAS_NUM_THREADS=$CORE

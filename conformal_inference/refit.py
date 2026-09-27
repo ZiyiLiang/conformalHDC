@@ -205,3 +205,34 @@ class FullConformalHDC():
                 if scores[-1] <= Q:
                     psets[i].append(label)
         return psets
+def full_conformal_all_scores(template, H, y, X, alpha, score_types):
+    """Reuse each augmented model and its similarities across score types."""
+    labels = template.class_labels
+    aug = np.empty(
+        (len(H) + 1, H.shape[1]),
+        dtype=np.result_type(H.dtype, X.dtype),
+    )
+    aug[:-1] = H
+    aug_y = np.empty(len(H) + 1, dtype=object)
+    aug_y[:-1] = y
+    targets = np.empty(len(H) + 1, dtype=int)
+    targets[:-1] = [template.label_to_idx[label] for label in y]
+    rank = int(np.ceil((1 - alpha) * len(aug))) - 1
+    result = {s: [[] for _ in X] for s in score_types}
+
+    for i, x in enumerate(X):
+        aug[-1] = x
+        for c, label in enumerate(labels):
+            aug_y[-1], targets[-1] = label, c
+            prototypes = template.prototype_builder(aug, aug_y, labels)
+            model = ConformalHDC(
+                prototypes, labels, sim_measure=template.sim_measure,
+                random_state=template.random_state, verbose=template.verbose,
+            )
+            sims = model._sim_matrix(aug)
+            for s in score_types:
+                scores = model._scores_from_sims(sims, targets, score_type=s)
+                if scores[-1] <= np.partition(scores, rank)[rank]:
+                    result[s][i].append(label)
+
+    return result

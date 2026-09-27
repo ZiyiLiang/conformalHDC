@@ -390,3 +390,21 @@ class ConformalHDC():
         best_indices = np.argmax(sims, axis=1)
         return [self.class_labels[idx] for idx in best_indices]
 
+
+class CachedConformalHDC(ConformalHDC):
+    """Cache fixed-model similarities for one repetition.
+
+    Registered arrays and class prototypes must remain unchanged until the
+    cache is replaced. Retain array references so identity checks stay valid.
+    """
+
+    def cache_similarities(self, *arrays):
+        compute = super()._sim_matrix
+        self._cached_sims = [(x, compute(x)) for x in arrays]
+        return self
+
+    def _sim_matrix(self, HVs):
+        for original, sims in getattr(self, "_cached_sims", ()):
+            if HVs is original:
+                return sims
+        return super()._sim_matrix(HVs)

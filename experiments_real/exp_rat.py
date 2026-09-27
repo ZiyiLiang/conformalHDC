@@ -14,7 +14,7 @@ try:
     from conformal_inference.methods import *
     from conformal_inference.utils import *
     from conformal_inference.refit import (
-        JackknifePlusHDC, FullConformalHDC, jackknife_all_scores 
+        JackknifePlusHDC, FullConformalHDC, jackknife_all_scores,full_conformal_all_scores
     )
     from data.load import load_rat_data
 except ImportError:
@@ -35,55 +35,7 @@ SLICING_WINDOW = 200
 STEP_BINS = 2
 
 
-class CachedConformalHDC(ConformalHDC):
-    """Cache fixed-model similarities for one repetition.
 
-    Registered arrays and class prototypes must remain unchanged until the
-    cache is replaced. Retain array references so identity checks stay valid.
-    """
-
-    def cache_similarities(self, *arrays):
-        compute = super()._sim_matrix
-        self._cached_sims = [(x, compute(x)) for x in arrays]
-        return self
-
-    def _sim_matrix(self, HVs):
-        for original, sims in getattr(self, "_cached_sims", ()):
-            if HVs is original:
-                return sims
-        return super()._sim_matrix(HVs)
-
-def full_conformal_all_scores(template, H, y, X, alpha, score_types):
-    """Reuse each augmented model and its similarities across score types."""
-    labels = template.class_labels
-    aug = np.empty(
-        (len(H) + 1, H.shape[1]),
-        dtype=np.result_type(H.dtype, X.dtype),
-    )
-    aug[:-1] = H
-    aug_y = np.empty(len(H) + 1, dtype=object)
-    aug_y[:-1] = y
-    targets = np.empty(len(H) + 1, dtype=int)
-    targets[:-1] = [template.label_to_idx[label] for label in y]
-    rank = int(np.ceil((1 - alpha) * len(aug))) - 1
-    result = {s: [[] for _ in X] for s in score_types}
-
-    for i, x in enumerate(X):
-        aug[-1] = x
-        for c, label in enumerate(labels):
-            aug_y[-1], targets[-1] = label, c
-            prototypes = template.prototype_builder(aug, aug_y, labels)
-            model = ConformalHDC(
-                prototypes, labels, sim_measure=template.sim_measure,
-                random_state=template.random_state, verbose=template.verbose,
-            )
-            sims = model._sim_matrix(aug)
-            for s in score_types:
-                scores = model._scores_from_sims(sims, targets, score_type=s)
-                if scores[-1] <= np.partition(scores, rank)[rank]:
-                    result[s][i].append(label)
-
-    return result
 
 def run_single_experiment(random_state, rat_id, alpha, beta):
 

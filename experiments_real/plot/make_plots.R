@@ -11,8 +11,8 @@ library(gridExtra)
 source("~/ConformalHDC/conformalHDC/experiments_real/plot/common.R")
 
 
-RESULT_ROOT = "~/ConformalHDC/conformalHDC/experiments_real/results"
-OUT_ROOT  = '~/ConformalHDC/conformalHDC/experiments_real/results/table'
+RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real/results"
+OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real/results/table'
 
 
 #-------------------------------------------------------------------------------
