@@ -19,11 +19,11 @@ def char2int(char):
     return ASCII_Z - ASCII_A + 1  # space and every other character
 
 
-def tokenize(x):
-    """Lower-cased text with collapsed whitespace as MAX_INPUT_SIZE padded token ids."""
-    x = re.sub(r"\s+", " ", x.lower())[:MAX_INPUT_SIZE]
+def tokenize(x, max_len=MAX_INPUT_SIZE):
+    """Lower-cased text with collapsed whitespace as max_len padded token ids."""
+    x = re.sub(r"\s+", " ", x.lower())[:max_len]
     ids = [char2int(ch) + 1 for ch in x]
-    return torch.tensor(ids + [PADDING_IDX] * (MAX_INPUT_SIZE - len(ids)), dtype=torch.long)
+    return torch.tensor(ids + [PADDING_IDX] * (max_len - len(ids)), dtype=torch.long)
 
 
 class TrigramEncoder(nn.Module):
@@ -39,9 +39,9 @@ class TrigramEncoder(nn.Module):
         hv = functional.ngrams(symbols, n=3)                         # [B, D]
         return functional.normalize(hv)                              # bipolarize
 
-    def encode_texts(self, texts, batch_size=256):
-        """Bipolar HVs of a list of strings, as a float32 numpy array."""
+    def encode_texts(self, texts, batch_size=256, max_len=MAX_INPUT_SIZE):
+        """Bipolar HVs of a list of strings (first max_len characters), as a float32 numpy array."""
         return np.concatenate([
-            self(torch.stack([tokenize(t) for t in texts[i:i + batch_size]])).cpu().numpy()
+            self(torch.stack([tokenize(t, max_len) for t in texts[i:i + batch_size]])).cpu().numpy()
             for i in range(0, len(texts), batch_size)
         ])

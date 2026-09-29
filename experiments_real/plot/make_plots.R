@@ -341,6 +341,167 @@ create_mnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
 
 
 #-------------------------------------------------------------------------------
+#                           Fashion MNIST Exp
+#-------------------------------------------------------------------------------
+# Set your results directory here
+setwd(RESULT_ROOT)
+results_dir <- "./fashion_mnist/" 
+
+# Pattern matches: seedX_alphaY.csv
+files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
+                    full.names = TRUE, recursive = TRUE)
+
+if (length(files) == 0) {
+  warning("No result files found! Check your directory path.")
+} else {
+  mnist_data <- files %>% 
+    map_df(~read_csv(., show_col_types = FALSE))
+  cat(paste("Loaded", length(files), "files. Total rows:", nrow(mnist_data), "\n"))
+}
+
+#------------------
+# Table Generation 
+#------------------
+
+create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
+  
+  # Filter Data by Alpha 
+  dat <- df %>% 
+    filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
+    filter(score_type != "vanilla_train")
+  
+  if (nrow(dat) == 0) {
+    warning(paste("No data found for alpha =", target_alpha))
+    return(NULL)
+  }
+  
+  #-----------------------
+  #  HDC Singleton Logic
+  #-----------------------
+  # Treat HDC (vanilla_full) as producing a singleton set:
+  #   - Set Coverage = Point Accuracy
+  #   - Set Size     = 1.0
+  hdc_as_sets <- dat %>%
+    filter(score_type == "vanilla_full", exp == "point_valued") %>%
+    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
+    mutate(
+      exp = "set_valued",
+      marginal = TRUE,
+      score_type = "vanilla_full",
+      set_cov = point_acc, # Coverage becomes Accuracy
+      set_size = 1.0       # Size is always 1
+    )
+  
+  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  dat <- dat %>%
+    filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
+    bind_rows(hdc_as_sets)
+  
+  #------------------------------------------------
+  # Aggregation (Grouped by Score Type)
+  #------------------------------------------------
+  
+  # --- A. Set-Valued Metrics (Marginal Only) --- 
+  # spilt conformal
+  set_metrics <- dat %>%
+    filter(method == "split_conformal") %>%
+    summary_set_val()
+  
+  # jk
+  set_metrics_jk <- dat %>%
+    filter(method == "jackknife_plus") %>%
+    summary_set_val()
+  
+  # fcp
+  set_metrics_fcp <- dat %>%
+    filter(method == "full_conformal") %>%
+    summary_set_val()
+  
+  # --- B. Point-Valued Metrics ---
+  point_metrics <- dat %>%
+    summary_point_val()
+  
+  
+  # --- C. OOD Metrics ---
+  ood_metrics <- dat %>%
+    summary_ood_val()
+  
+  # --- D. Merge & Format ---
+  base <- tibble(score_type = unique(dat$score_type))
+  
+  
+  joined <- base %>%
+    left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
+    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
+    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
+    left_join(point_metrics, by = "score_type") %>%
+    left_join(ood_metrics,   by = "score_type")
+  
+  formatted <- joined %>%
+    transmute(
+      score_type = score_type,
+      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
+      Size_std = fmt(std_m_siz_u, std_m_siz_se),
+      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
+      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
+      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
+      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
+      Accuracy      = fmt(acc_u,     acc_se),
+      AUROC      = fmt(ood_u,     ood_se)
+    )
+  
+  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  formatted <- formatted %>%
+    mutate(Method = case_when(
+      score_type == "vanilla_full" ~ "HDC",
+      score_type == "inverse_quantile" ~ "Inv. quantile",
+      score_type == "penalized" ~ "Penalized",
+      score_type == "sim" ~ "Similarity",
+      score_type == "ratio" ~ "CHDC-ratio",
+      score_type == "discount" ~ "CHDC-discount",
+      TRUE ~ score_type
+    )) %>%
+    filter(Method != "vanilla_train") %>%
+    # Use exact same order as 3-class
+    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
+                                      "Similarity", "CHDC-ratio", "CHDC-discount")))
+  formatted_standard = formatted%>%
+    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+  formatted_set_compare = formatted%>%
+    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
+  
+  # --- F. Construct and save to LaTeX---
+  # Structure: Method | Cov Size | Acc | OOD |
+  
+  export_latex_table(
+    df = formatted_standard,
+    align_str = "l|l|cc|c|c|",
+    header_cmd = header_standard,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("fmnist_table_alpha", target_alpha, ".tex") else "mnist_table.tex"
+  )
+  
+  # Structure: Method | Cov Size | Cov Size | Cov Size
+  export_latex_table(
+    df = formatted_set_compare,
+    align_str = "l|l|cc|cc|cc|",
+    header_cmd = header_set_compare,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("fmnist_set_compare_table_alpha", target_alpha, ".tex") else "mnist_set_compare_table.tex"
+  )
+}
+
+#------------------
+# Save Table 
+#------------------
+table_dir <- paste0(OUT_ROOT,'/fashion_mnist/')
+
+# Generate for typical Alphas
+create_fmnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
+create_fmnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
+
+
+#-------------------------------------------------------------------------------
 #                         Languages Exp
 #-------------------------------------------------------------------------------
 # Set your results directory here
@@ -508,6 +669,164 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
 table_dir <- paste0(OUT_ROOT,'/languages')
 create_languages_table(languages_data, target_alpha = 0.01, save_dir = table_dir)
 
+
+
+#-------------------------------------------------------------------------------
+#                           PAMAP2 physical activity
+#-------------------------------------------------------------------------------
+# Set your results directory here
+setwd(RESULT_ROOT)
+results_dir <- "./pamap2/" 
+
+# Pattern matches: seedX_alphaY.csv
+files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
+                    full.names = TRUE, recursive = TRUE)
+
+if (length(files) == 0) {
+  warning("No result files found! Check your directory path.")
+} else {
+  uci_har_data <- files %>% 
+    map_df(~read_csv(., show_col_types = FALSE))
+  cat(paste("Loaded", length(files), "files. Total rows:", nrow(uci_har_data), "\n"))
+}
+
+
+#------------------
+# Table Generation 
+#------------------ 
+create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
+  
+  # Filter Data by Alpha 
+  dat <- df %>% 
+    filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
+    filter(score_type != "vanilla_train")
+  
+  if (nrow(dat) == 0) {
+    warning(paste("No data found for alpha =", target_alpha))
+    return(NULL)
+  }
+  
+  #-----------------------
+  #  HDC Singleton Logic
+  #-----------------------
+  # Treat HDC (vanilla_full) as producing a singleton set:
+  #   - Set Coverage = Point Accuracy
+  #   - Set Size     = 1.0
+  hdc_as_sets <- dat %>%
+    filter(score_type == "vanilla_full", exp == "point_valued") %>%
+    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
+    mutate(
+      exp = "set_valued",
+      marginal = TRUE,
+      score_type = "vanilla_full",
+      set_cov = point_acc, # Coverage becomes Accuracy
+      set_size = 1.0       # Size is always 1
+    )
+  
+  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  dat <- dat %>%
+    filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
+    bind_rows(hdc_as_sets)
+  
+  #------------------------------------------------
+  # Aggregation (Grouped by Score Type)
+  #------------------------------------------------
+  
+  # --- A. Set-Valued Metrics (Marginal Only) ---
+  # spilt conformal
+  set_metrics <- dat %>%
+    filter(method == "split_conformal") %>%
+    summary_set_val()
+  
+  # jk
+  set_metrics_jk <- dat %>%
+    filter(method == "jackknife_plus") %>%
+    summary_set_val()
+  
+  # fcp
+  set_metrics_fcp <- dat %>%
+    filter(method == "full_conformal") %>%
+    summary_set_val()
+  
+  # --- B. Point-Valued Metrics ---
+  point_metrics <- dat %>%
+    summary_point_val()
+  
+  
+  # --- C. OOD Metrics ---
+  ood_metrics <- dat %>%
+    summary_ood_val()
+  
+  
+  # --- D. Merge & Format ---
+  base <- tibble(score_type = unique(dat$score_type))
+  
+  joined <- base %>%
+    left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
+    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
+    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
+    left_join(point_metrics, by = "score_type") %>%
+    left_join(ood_metrics,   by = "score_type")
+  
+  formatted <- joined %>%
+    transmute(
+      score_type = score_type,
+      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
+      Size_std = fmt(std_m_siz_u, std_m_siz_se),
+      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
+      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
+      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
+      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
+      Accuracy      = fmt(acc_u,     acc_se),
+      AUROC      = fmt(ood_u,     ood_se)
+    )
+  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  formatted <- formatted %>%
+    mutate(Method = case_when(
+      score_type == "vanilla_full" ~ "HDC",
+      score_type == "inverse_quantile" ~ "Inv. quantile",
+      score_type == "penalized" ~ "Penalized",
+      score_type == "sim" ~ "Similarity",
+      score_type == "ratio" ~ "CHDC-ratio",
+      score_type == "discount" ~ "CHDC-discount",
+      TRUE ~ score_type
+    )) %>%
+    filter(Method != "vanilla_train") %>%
+    # Use exact same order as 3-class
+    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
+                                      "Similarity", "CHDC-ratio", "CHDC-discount")))
+  formatted_standard = formatted%>%
+    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+  formatted_set_compare = formatted%>%
+    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
+  
+  # --- F. Construct LaTeX Header ---
+  
+  export_latex_table(
+    df = formatted_standard,
+    align_str = "l|l|cc|c|c|",
+    header_cmd = header_standard,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("pamap2_table_alpha", target_alpha, ".tex") else "uci_har_table.tex"
+  )
+  
+  # Structure: Method | Cov Size | Cov Size | Cov Size
+  export_latex_table(
+    df = formatted_set_compare,
+    align_str = "l|l|cc|cc|cc|",
+    header_cmd = header_set_compare,
+    save_dir = save_dir,
+    file_name = if (exists("target_alpha")) paste0("pamap2_set_compare_table_alpha", target_alpha, ".tex") else "uci_har_set_compare_table.tex"
+  )
+} 
+#------------------
+# Save Table 
+#------------------
+table_dir <- paste0(OUT_ROOT,'/pamap2')
+
+# Generate for typical Alphas
+create_pamap2_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
+create_pamap2_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
 
 #-------------------------------------------------------------------------------
 #                           UCI HAR Exp

@@ -17,6 +17,7 @@ try:
         JackknifePlusHDC, FullConformalHDC, jackknife_all_scores,full_conformal_all_scores
     )
     from data.load import load_rat_data
+    from data.config import RESULTS_ROOT
 except ImportError:
     print("Warning: NeuroHDC or conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -269,7 +270,7 @@ if __name__ == "__main__":
     beta_arg = float(sys.argv[4])
 
     # Directory Setup
-    out_dir = Path(f"./results/{EXP_NAME}")
+    out_dir = RESULTS_ROOT / EXP_NAME
     out_dir.mkdir(parents=True, exist_ok=True)
     # rat_name = ['Barat','Buchanan','Mitt','Stella','Superchris']
     outfile = out_dir / f"rat{rat_arg}_seed{seed_arg}_alpha{alpha_arg}_beta{beta_arg}.csv"  

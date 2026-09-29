@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# one seed, 4 repetition, takes 2 mins, < 2GB
+# one seed, 4 repetition, takes 2 min, < 2GB
 # # --- QUICK TEST LIST ---
 # SEED_LIST=(1)
 # ALPHA_LIST=(0.1)
 
 # --- EXPERIMENT LIST ---
-SEED_LIST=($(seq 1 10))
-ALPHA_LIST=(0.1 0.15 0.2)
+SEED_LIST=($(seq 1 25))
+ALPHA_LIST=(0.1)
 
 # Slurm parameters
-EXPNAME="uci_har"
-MEMO=8G                            
+EXPNAME="pamap2"
+MEMO=4G                            
 TIME=00-03:00:00                 
 CORE=1                        
 
@@ -45,7 +45,7 @@ for SEED in ${SEED_LIST[@]}; do
             ((incomp++))
             
             # Script arguments: <seed> <alpha>
-            SCRIPT="exp_har.sh $SEED $ALPHA"
+            SCRIPT="exp_pamap2.sh $SEED $ALPHA"
             
             # Log files
             OUTF=$LOGS"/"$JOBN".out"

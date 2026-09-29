@@ -322,14 +322,17 @@ class FastConformal:
 
     def _full_conformal_keep(self, c, batch, score_types, rank):
         """[(tests, {score type: kept})] for the models of one same-class batch."""
-        n = len(self.targets)
-        draws = self.model._uniform_draws(n + 1)  # seeded, so identical in every unit
-        thresholds = self._dev_thresholds(c, [change for change, _ in batch], score_types, draws[:n], rank)
+        n, n_test = len(self.targets), self.rule.sims["test"].shape[0]
+        draws = self.model._uniform_draws(n)  # seeded, so identical in every unit
+        # One draw per test observation, as in jackknife+. A single draw shared by
+        # every test sample would move all their randomized scores together.
+        test_draws = self.model._uniform_draws(n_test, offset=n)
+        thresholds = self._dev_thresholds(c, [change for change, _ in batch], score_types, draws, rank)
         results = []
         for b, (change, tests) in enumerate(batch):
             last = self._sims("test", tests, change)
             results.append((tests, {s: self.model._scores_from_sims(
-                last, np.full(len(tests), c), score_type=s, U=np.full(len(tests), draws[n]),
+                last, np.full(len(tests), c), score_type=s, U=test_draws[tests],
             ) <= thresholds[s][b] for s in score_types}))
         return results
 

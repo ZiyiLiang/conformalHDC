@@ -27,7 +27,7 @@ export MKL_NUM_THREADS=1
 
 # Directories
 LOGS="logs/"$EXPNAME
-OUT_DIR="results/"$EXPNAME
+OUT_DIR="/scratch/cora_to_zoey/chdc/exp_real/results/"$EXPNAME  # RESULTS_ROOT in data/config.py
 
 mkdir -p $LOGS
 mkdir -p $OUT_DIR

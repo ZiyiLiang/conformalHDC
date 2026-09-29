@@ -160,15 +160,18 @@ class FullConformalHDC():
         self.score_kwargs = dict(kwargs)
         return self
 
-    def _candidate_scores(self, aug_HVs, aug_labels, targets):
-        ''' Refit one augmented classifier and score all n+1 observations with it. '''
+    def _candidate_scores(self, aug_HVs, aug_labels, targets, U):
+        ''' Refit one augmented classifier and score all n+1 observations with it.
 
-        prototypes =  self.prototype_builder(aug_HVs, aug_labels, self.class_labels) 
+            U: one uniform draw per augmented row (used by randomized scores).
+        '''
+
+        prototypes =  self.prototype_builder(aug_HVs, aug_labels, self.class_labels)
         model = ConformalHDC(prototypes, self.class_labels,
                              sim_measure=self.sim_measure,
                              random_state=self.random_state, verbose=self.verbose)
         scores = model._compute_nonconformity_scores(
-                aug_HVs, targets, score_type=self.score_type, **self.score_kwargs,
+                aug_HVs, targets, score_type=self.score_type, U=U, **self.score_kwargs,
             )
         return scores
 
@@ -192,15 +195,21 @@ class FullConformalHDC():
         aug_labels[:-1] = self.dev_labels
         targets = np.empty(n_aug, dtype=int)
         targets[:-1] = self.dev_targets
+        # Development row i keeps draw i; test sample i gets its own draw n + i.
+        draws = np.random.RandomState(self.random_state).uniform(
+            size=self.n_development + len(test_HVs),
+        )
+        U = draws[:n_aug].copy()
 
         psets = [[] for _ in range(len(test_HVs))]
         for i, HV in enumerate(test_HVs):
             aug_HVs[-1] = HV
+            U[-1] = draws[self.n_development + i]
             for c_idx, label in enumerate(self.class_labels):
                 # assign the test feature to class c
                 aug_labels[-1] = label
                 targets[-1] = c_idx
-                scores = self._candidate_scores(aug_HVs, aug_labels, targets)
+                scores = self._candidate_scores(aug_HVs, aug_labels, targets, U)
                 Q = np.partition(scores, Qrank)[Qrank] # (1-alpha)(n+1)-th smallest value
                 if scores[-1] <= Q:
                     psets[i].append(label)
@@ -219,9 +228,13 @@ def full_conformal_all_scores(template, H, y, X, alpha, score_types):
     targets[:-1] = [template.label_to_idx[label] for label in y]
     rank = int(np.ceil((1 - alpha) * len(aug))) - 1
     result = {s: [[] for _ in X] for s in score_types}
+    # Development row i keeps draw i; test sample i gets its own draw n + i.
+    draws = np.random.RandomState(template.random_state).uniform(size=len(H) + len(X))
+    U = draws[:len(aug)].copy()
 
     for i, x in enumerate(X):
         aug[-1] = x
+        U[-1] = draws[len(H) + i]
         for c, label in enumerate(labels):
             aug_y[-1], targets[-1] = label, c
             prototypes = template.prototype_builder(aug, aug_y, labels)
@@ -231,7 +244,7 @@ def full_conformal_all_scores(template, H, y, X, alpha, score_types):
             )
             sims = model._sim_matrix(aug)
             for s in score_types:
-                scores = model._scores_from_sims(sims, targets, score_type=s)
+                scores = model._scores_from_sims(sims, targets, score_type=s, U=U)
                 if scores[-1] <= np.partition(scores, rank)[rank]:
                     result[s][i].append(label)
 

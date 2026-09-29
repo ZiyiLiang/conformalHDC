@@ -1,22 +1,29 @@
 #!/bin/bash
 
-# one seed, 4 repetition, takes 2 mins, < 2GB
+# 1 seed w/ 4 repetitions takes 1 min, peaks memory <6GB
+
 # # --- QUICK TEST LIST ---
 # SEED_LIST=(1)
 # ALPHA_LIST=(0.1)
 
-# --- EXPERIMENT LIST ---
-SEED_LIST=($(seq 1 10))
-ALPHA_LIST=(0.1 0.15 0.2)
+# # --- FULL EXPERIMENT LIST ---
+SEED_LIST=($(seq 1 25))
+ALPHA_LIST=(0.05 0.1)
+
+EXPNAME="fashion_mnist"
 
 # Slurm parameters
-EXPNAME="uci_har"
-MEMO=8G                            
-TIME=00-03:00:00                 
-CORE=1                        
+MEMO=8G                             
+TIME=00-04:00:00                    
+CORE=1                              
 
 # Assemble order
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
+
+# Thred limit
+export OPENBLAS_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 
 # Directories
 LOGS="logs/"$EXPNAME
@@ -31,7 +38,7 @@ incomp=0
 for SEED in ${SEED_LIST[@]}; do
     for ALPHA in ${ALPHA_LIST[@]}; do
     
-        # Define Job Name and Output File
+        # Define Job Name and Output File (Matches format in exp_fashion_mnist.py)
         JOBN="seed"$SEED"_alpha"$ALPHA
         OUT_FILE=$OUT_DIR"/seed"$SEED"_alpha"$ALPHA".csv"
         
@@ -44,8 +51,8 @@ for SEED in ${SEED_LIST[@]}; do
         if [[ $COMPLETE -eq 0 ]]; then
             ((incomp++))
             
-            # Script arguments: <seed> <alpha>
-            SCRIPT="exp_har.sh $SEED $ALPHA"
+            # Script to be run: <seed> <alpha>
+            SCRIPT="exp_fashion_mnist.sh $SEED $ALPHA"
             
             # Log files
             OUTF=$LOGS"/"$JOBN".out"
@@ -61,5 +68,4 @@ for SEED in ${SEED_LIST[@]}; do
     done
 done
 
-echo "Jobs already completed: $comp"
-echo "Jobs submitted: $incomp"
+echo "Jobs already completed: $comp, submitted unfinished jobs: $incomp"

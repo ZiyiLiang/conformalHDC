@@ -22,6 +22,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from conformal_inference.fast import FastConformal, class_prototypes
 from conformal_inference.methods import CachedConformalHDC, ConformalHDC
 from conformal_inference.utils import eval_accuracy, eval_lc_accuracy
+from data.config import RESULTS_ROOT
 from hdc_encoder.level import encode_levels, make_im_cim
 
 REPETITIONS = 4 
@@ -206,12 +207,12 @@ def run_level_experiment(L, y, labels_id, labels_ood, test_size, levels, random_
 ################======== Main Execution ========################
 
 def main(run_single_experiment, exp_name):
-    """Run REPETITIONS seeds of one seed group and save them to results/<exp_name>/."""
+    """Run REPETITIONS seeds of one seed group and save them to RESULTS_ROOT/<exp_name>/."""
     if len(sys.argv) != 3:
         log(f"Usage: python {Path(sys.argv[0]).name} <seed_group_id> <alpha>")
         sys.exit(1)
     seed_arg, alpha_arg = int(sys.argv[1]), float(sys.argv[2])
-    out_dir = Path(f"./results/{exp_name}")
+    out_dir = RESULTS_ROOT / exp_name
     out_dir.mkdir(parents=True, exist_ok=True)
     outfile = out_dir / f"seed{seed_arg}_alpha{alpha_arg}.csv"
     log(f"Starting job: Seed Group {seed_arg}, Alpha {alpha_arg}, Reps {REPETITIONS}")

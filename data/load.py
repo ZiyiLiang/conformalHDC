@@ -268,6 +268,56 @@ def load_mnist_data():
     ])
 
 
+def load_fashion_mnist_data():
+    """Return concatenated Fashion-MNIST train/test datasets with the original transform."""
+    from torch.utils.data import ConcatDataset
+    from torchvision import datasets, transforms
+
+    root = str(DATA_ROOT)
+    transform = transforms.ToTensor()
+    return ConcatDataset([
+        datasets.FashionMNIST(root=root, train=True, transform=transform, download=True),
+        datasets.FashionMNIST(root=root, train=False, transform=transform, download=True),
+    ])
+
+
+def load_pamap2_data(folder="Protocol", window=256):
+    """Window statistics of the PAMAP2 recordings in `folder` ("Protocol" or "Optional")
+    and zero-based activity labels.
+
+    Non-overlapping windows of `window` samples (2.56 s at 100 Hz) are cut within each
+    contiguous run of one activity of one subject; each window gives the mean, std, min
+    and max of heart rate and the acc (+-16g), gyro and magnetometer channels of the
+    three IMUs. Labels index the folder's activity IDs in sorted order (the 12 protocol
+    activities for "Protocol").
+    """
+    path = DATA_ROOT / "PAMAP2" / "PAMAP2_Dataset" / folder
+    # Column 2 is heart rate; each IMU block of 17 starts with temperature, then
+    # acc16 (3), acc6 (3), gyro (3), magnetometer (3) and invalid orientation (4).
+    channels = [2] + [imu + offset for imu in (3, 20, 37)
+                      for offset in [1, 2, 3, 7, 8, 9, 10, 11, 12]]
+    X, y = [], []
+    for f in sorted(path.glob("subject*.dat")):
+        data = pd.read_csv(f, sep=" ", header=None).values
+        data[:, 2] = pd.Series(data[:, 2]).ffill().bfill().values  # heart rate is ~9 Hz
+        activity = data[:, 1].astype(int)
+        # Start of every contiguous run of one activity
+        starts = np.flatnonzero(np.diff(activity, prepend=-1))
+        for start, end in zip(starts, np.append(starts[1:], len(activity))):
+            if activity[start] == 0:  # transient periods
+                continue
+            for w in range(start, end - window + 1, window):
+                seg = data[w:w + window][:, channels]
+                seg = seg[~np.isnan(seg).any(axis=1)]  # dropped wireless packets
+                if len(seg) < window // 2:
+                    continue
+                X.append(np.concatenate([seg.mean(0), seg.std(0), seg.min(0), seg.max(0)]))
+                y.append(activity[start])
+    activities = sorted(set(y))
+    label_to_id = {a: i for i, a in enumerate(activities)}
+    return np.array(X, dtype=np.float32), np.array([label_to_id[a] for a in y], dtype=np.int64)
+
+
 def load_isolet_data():
     """Return float32 features and sorted, zero-based int64 class labels."""
     from sklearn.datasets import fetch_openml
@@ -291,6 +341,22 @@ def load_languages_data(transform):
         EuropeanLanguages(root, train=True, transform=transform, download=True),
         EuropeanLanguages(root, train=False, transform=transform, download=True),
     )
+
+
+def load_ag_news_data():
+    """AG News train-then-test texts and labels (World, Sports, Business, Sci/Tech).
+
+    Reads ag_news.csv (columns text, label). If it is missing, it is exported once from
+    the Hugging Face copy, which needs the `datasets` package.
+    """
+    path = DATA_ROOT / "ag_news" / "ag_news.csv"
+    if not path.exists():
+        from datasets import load_dataset
+
+        d = load_dataset("ag_news", cache_dir=str(DATA_ROOT / "ag_news"))
+        pd.concat([d[split].to_pandas() for split in ("train", "test")]).to_csv(path, index=False)
+    df = pd.read_csv(path, keep_default_na=False)
+    return df["text"].tolist(), df["label"].to_numpy(), ["World", "Sports", "Business", "Sci/Tech"]
 
 
 def load_rat_data(irat, split_ratio, training_window, running_window,
