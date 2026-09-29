@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm 
-from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import accuracy_score
 
 # Allow imports from the project root.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -18,7 +18,10 @@ try:
     )
     from data.load import load_rat_data
     from data.config import RESULTS_ROOT
-    from experiments_real.common import eval_accuracy, eval_lc_accuracy, adaptive_alpha
+    from experiments_real.common import (
+        eval_accuracy, eval_lc_accuracy, adaptive_alpha,
+        development_set, set_metrics, ood_auroc, log,
+    )
 except ImportError:
     print("Warning: NeuroHDC or conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -35,9 +38,6 @@ RUNNING_WINDOW = (0, 200)
 BIN_SIZE = 25
 SLICING_WINDOW = 200
 STEP_BINS = 2
-
-
-
 
 def run_single_experiment(random_state, rat_id, alpha, beta):
 
@@ -57,8 +57,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
     X_cal, y_cal = splits.cal.X, splits.cal.y
     X_test, y_test = splits.test.X, splits.test.y
     
-    print(f"Data loaded.")
-    sys.stdout.flush()
+    log("Data loaded.")
 
     # Encoder Setup
     n, nT, p = X_train.shape 
@@ -79,13 +78,11 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
     proto_train = np.stack([proto_dict[k] for k in unique_labels])
 
     # 2. Full (Train + Calib) (For Vanilla)
-    enc_full = np.concatenate((enc_train, enc_cal), axis=0)
-    y_full = np.concatenate((y_train, y_cal), axis=0)
+    enc_full, y_full = development_set((enc_train, y_train), (enc_cal, y_cal))
     proto_full_dict = rff.build_class_prototypes(enc_full, y_full)
     proto_full = np.stack([proto_full_dict[k] for k in unique_labels])
 
-    print("Prototypes built.")
-    sys.stdout.flush()
+    log("Prototypes built.")
 
     # Conformal methods
     chdc = CachedConformalHDC(
@@ -135,17 +132,6 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
             else:
                 sets = fc_sets[stype]
  
-            sizes = [len(p) for p in sets]
-            covered = np.array([
-                y in pset for y, pset in zip(y_test, sets)
-            ])
-
-            # Label conditional coverage
-            lc_covs = [
-                np.mean(covered[y_test == lbl])
-                for lbl in unique_labels if np.any(y_test == lbl)
-            ]
-
             exp_results.append({
                 "exp": "set_valued",
                 "method": method,
@@ -155,9 +141,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
                 "alpha": alpha,
                 "beta": beta,
                 "marginal": marginal,
-                "set_cov": np.mean(covered),
-                "set_size": np.mean(sizes),
-                "lc_covs": lc_covs if lc_covs else 0.0,
+                **set_metrics(sets, y_test, unique_labels),
                 # Placeholders
                 "point_acc": np.nan, 
                 "lc_accs":np.nan, 
@@ -169,7 +153,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
         adap_alpha = adaptive_alpha(chdc, enc_cal, y_cal, unique_labels)
         # compute the score to choose alpha based on lc acc, then input the alpha list to this function to compute acc.
         preds_pt = chdc.point_valued_CP(enc_test, adap_alpha, allow_empty=False, marginal=False)
-        
+
         # preds_pt = chdc.point_valued_CP(enc_test, alpha, allow_empty=False, marginal=False)
         # preds_pt = np.array(preds_pt).ravel()
         acc_pt = eval_accuracy(preds_pt, y_test)
@@ -194,9 +178,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
             p_vals_id  = chdc.get_max_p_value(enc_test, marginal=marginal)
             p_vals_ood = chdc.get_max_p_value(enc_ood, marginal=marginal)
             
-            y_true_roc = np.concatenate([np.ones(len(p_vals_id)), np.zeros(len(p_vals_ood))])
-            y_scores_roc = np.concatenate([p_vals_id, p_vals_ood])
-            ood_auroc = roc_auc_score(y_true_roc, y_scores_roc)
+            auroc = ood_auroc(p_vals_id, p_vals_ood)
             
             exp_results.append({
                 "exp": "ood",
@@ -206,14 +188,13 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
                 "alpha": alpha,
                 "beta": beta,
                 "marginal": marginal,
-                "ood_auroc": ood_auroc,
+                "ood_auroc": auroc,
                 # Placeholders
                 "set_cov": np.nan, "set_size": np.nan, "point_acc": np.nan, 
                 "lc_covs": np.nan, "lc_accs": np.nan
             })
 
-    print("Finished running conformaHDC.")
-    sys.stdout.flush()
+    log("Finished running conformaHDC.")
 
     # Baseline Vanilla HDC (Train Only)
     preds_vanilla = chdc.predict(enc_test)
@@ -255,8 +236,7 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
         "lc_covs": np.nan, "ood_auroc": np.nan
     })
 
-    print("Finished running vanilla HDC.")
-    sys.stdout.flush()
+    log("Finished running vanilla HDC.")
 
     return pd.DataFrame(exp_results)
 

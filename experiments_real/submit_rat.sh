@@ -2,15 +2,14 @@
 
 # One rat for 25 seeds takes 8 mins, peaks memory < 1GB
 
-# --- QUICK TEST LIST ---
-SEED_LIST=(1)
-RAT_LIST=(0)
-ALPHA_LIST=(0.2)
+# # --- QUICK TEST LIST ---
+# SEED_LIST=(1)
+# RAT_LIST=(0)
+# ALPHA_LIST=(0.2)
 
-# # # --- FULL EXPERIMENT LIST ---
-# SEED_LIST=($(seq 1 25))
-# RAT_LIST=$(seq 0 4)      
-#ALPHA_LIST=(0.1 0.2) 
+# # --- FULL EXPERIMENT LIST ---
+SEED_LIST=($(seq 1 25))
+RAT_LIST=$(seq 0 4)      
 ALPHA_LIST=(0.2) 
 BETA_LIST=(0.3)
 
