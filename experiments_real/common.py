@@ -60,16 +60,57 @@ def loader_orders(passes, batch_size):
         for n, shuffle in passes
     ]
 
-
 def development_set(train, cal):
     """Train + calibration (hvs, labels), the data jackknife+ and full conformal fit on."""
     return np.concatenate((train[0], cal[0])), np.concatenate((train[1], cal[1]))
-
 
 def balance_ood(ood, n_test):
     """Truncate the OOD split to at most as many samples as the test split."""
     return ood[:min(len(ood), n_test)]
 
+def masked_sims_table(chdc, hvs, alphas):
+    """masked[a, i, c]: similarity of hvs[i] to class c if c is in its label-conditional
+    set at alphas[a], else -inf. Scores and similarities are computed once."""
+    scores, sims = chdc._test_scores(hvs), chdc._sim_matrix(hvs)
+    keep = np.stack([scores <= chdc._thresholds(a, marginal=False) for a in alphas])
+    return np.where(keep, sims, -np.inf), sims.argmax(axis=1)
+
+def trimmed_predictions(masked, fallback, idx):
+    """Canonical point predictions for per-class alpha indices idx."""
+    per_class = masked[idx, :, np.arange(len(idx))].T  # (n, n_class)
+    pred = per_class.argmax(axis=1)
+    return np.where(np.isfinite(per_class).any(axis=1), pred, fallback)
+
+def coordinate_ascent(objective, n_class, n_grid, max_passes=10):
+    """Grid indices maximizing objective: best shared index first, then one class at a
+    time, keeping only strict improvements so ties stay at the lower index."""
+    idx = max((np.full(n_class, a) for a in range(n_grid)), key=objective)
+    best = objective(idx)
+    for _ in range(max_passes):
+        changed = False
+        for c in range(n_class):
+            for a in range(n_grid):
+                if a == idx[c]:
+                    continue
+                trial = idx.copy()
+                trial[c] = a
+                score = objective(trial)
+                if score > best:
+                    idx, best, changed = trial, score, True
+        if not changed:
+            break
+    return idx
+
+def adaptive_alpha(chdc, calib_hvs, calib_y, LABELS_ID, max_passes=10):
+    """Per-class alpha maximizing overall calibration accuracy of the point predictor."""
+    
+    ALPHA_GRID = np.array([0.01, 0.05, 0.1, 0.15, 0.2])  # ascending: ties go to the smaller alpha
+
+    masked, fallback = masked_sims_table(chdc, calib_hvs, ALPHA_GRID)
+    y_idx = np.array([chdc.label_to_idx[l] for l in np.asarray(calib_y).tolist()])
+    # evaluate the overall accuracy for each grid 
+    objective = lambda idx: eval_accuracy(trimmed_predictions(masked, fallback, idx), y_idx)
+    return ALPHA_GRID[coordinate_ascent(objective, len(LABELS_ID), len(ALPHA_GRID), max_passes)]
 
 ################======== Metrics ========################
 
@@ -123,7 +164,12 @@ def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_st
                          **shared, **set_metrics(sets, test_y, labels)})
 
         # 2. Point-Valued Prediction
-        preds = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
+        #NOTE adaptive alpha
+        adap_alpha = adaptive_alpha(chdc, cal_hvs, cal_y, labels)
+        # compute the score to choose alpha based on lc acc, then input the alpha list to this function to compute acc.
+        preds = chdc.point_valued_CP(test_hvs, adap_alpha, allow_empty=False, marginal=False)
+        # static alpha
+        #  preds = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
         rows.append({"exp": "point_valued", **shared, **point_metrics(preds, test_y, labels)})
 
         # 3. OOD Detection

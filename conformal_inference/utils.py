@@ -45,8 +45,8 @@ def eval_accuracy(y_pred, y_true):
             Float accuracy score [0.0, 1.0].
     '''
     # Ensure inputs are numpy arrays for element-wise comparison
-    y_pred = np.array(y_pred)
-    y_true = np.array(y_true)
+    y_pred = np.array(y_pred).ravel()
+    y_true = np.array(y_true).ravel()
     
     if len(y_pred) != len(y_true):
         raise ValueError(f"Shape mismatch: preds {len(y_pred)} vs true {len(y_true)}")
@@ -66,8 +66,8 @@ def eval_lc_accuracy(y_pred, y_true, labels_id):
             List of float accuracy scores corresponding to the order of labels_id.
             Returns np.nan for classes with no samples in y_true.
     '''
-    y_pred = np.array(y_pred)
-    y_true = np.array(y_true)
+    y_pred = np.array(y_pred).ravel()
+    y_true = np.array(y_true).ravel()
     
     if len(y_pred) != len(y_true):
         raise ValueError(f"Shape mismatch: preds {len(y_pred)} vs true {len(y_true)}")

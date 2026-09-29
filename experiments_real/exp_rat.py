@@ -18,6 +18,7 @@ try:
     )
     from data.load import load_rat_data
     from data.config import RESULTS_ROOT
+    from experiments_real.common import eval_accuracy, eval_lc_accuracy, adaptive_alpha
 except ImportError:
     print("Warning: NeuroHDC or conformalHDC modules not found. Ensure '../' is in path.")
 
@@ -163,9 +164,14 @@ def run_single_experiment(random_state, rat_id, alpha, beta):
                 "ood_auroc": np.nan
             })
         
-        # 2. Point-Valued Prediction
-        preds_pt = chdc.point_valued_CP(enc_test, alpha, allow_empty=False, marginal=False)
-        preds_pt = np.array(preds_pt).ravel()
+        # 2. Point-Valued Prediction 
+        #NOTE adaptive alpha
+        adap_alpha = adaptive_alpha(chdc, enc_cal, y_cal, unique_labels)
+        # compute the score to choose alpha based on lc acc, then input the alpha list to this function to compute acc.
+        preds_pt = chdc.point_valued_CP(enc_test, adap_alpha, allow_empty=False, marginal=False)
+        
+        # preds_pt = chdc.point_valued_CP(enc_test, alpha, allow_empty=False, marginal=False)
+        # preds_pt = np.array(preds_pt).ravel()
         acc_pt = eval_accuracy(preds_pt, y_test)
         lc_accs = eval_lc_accuracy(preds_pt, y_test, unique_labels)
 

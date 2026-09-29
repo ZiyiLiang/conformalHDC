@@ -3,13 +3,13 @@
 # One rat for 25 seeds takes 8 mins, peaks memory < 1GB
 
 # --- QUICK TEST LIST ---
-# SEED_LIST=(1)
-# RAT_LIST=(0)
-# ALPHA_LIST=(0.2)
+SEED_LIST=(1)
+RAT_LIST=(0)
+ALPHA_LIST=(0.2)
 
-# # --- FULL EXPERIMENT LIST ---
-SEED_LIST=($(seq 1 25))
-RAT_LIST=$(seq 0 4)      
+# # # --- FULL EXPERIMENT LIST ---
+# SEED_LIST=($(seq 1 25))
+# RAT_LIST=$(seq 0 4)      
 #ALPHA_LIST=(0.1 0.2) 
 ALPHA_LIST=(0.2) 
 BETA_LIST=(0.3)
@@ -30,7 +30,7 @@ export MKL_NUM_THREADS=1
 
 # Directories
 LOGS="logs/"$EXPNAME
-OUT_DIR="/scratch/cora_to_zoey/chdc/exp_real/results/"$EXPNAME  # RESULTS_ROOT in data/config.py
+OUT_DIR="/scratch/cora_to_zoey/chdc/exp_real_adaptive/results/"$EXPNAME  # RESULTS_ROOT in data/config.py
 
 mkdir -p $LOGS
 mkdir -p $OUT_DIR

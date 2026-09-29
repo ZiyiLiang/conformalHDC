@@ -10,9 +10,9 @@ library(stringr)
 library(gridExtra)
 source("~/ConformalHDC/conformalHDC/experiments_real/plot/common.R")
 
-
-RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real/results"
-OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real/results/table'
+# CHANGE THIS!
+RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real_adaptive/results"
+OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real_adaptive/results/table'
 
 
 #-------------------------------------------------------------------------------
@@ -333,7 +333,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
-table_dir <- paste0(OUT_ROOT,'/mnist/')
+table_dir <- paste0(OUT_ROOT,'/mnist')
 
 # Generate for typical Alphas
 create_mnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
@@ -494,7 +494,7 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
-table_dir <- paste0(OUT_ROOT,'/fashion_mnist/')
+table_dir <- paste0(OUT_ROOT,'/fashion_mnist')
 
 # Generate for typical Alphas
 create_fmnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
@@ -826,7 +826,7 @@ table_dir <- paste0(OUT_ROOT,'/pamap2')
 
 # Generate for typical Alphas
 create_pamap2_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
-create_pamap2_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
+# create_pamap2_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
 
 #-------------------------------------------------------------------------------
 #                           UCI HAR Exp

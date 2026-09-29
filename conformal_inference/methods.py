@@ -19,7 +19,6 @@ class ConformalHDC():
         self.label_to_idx = {label: i for i, label in enumerate(class_labels)}
 
         self.sim_measure = sim_measure
-
         self.random_state = random_state
         self.verbose = verbose
 
@@ -278,11 +277,20 @@ class ConformalHDC():
                           for scores in self.calib_scores_per_label]
         return np.array(self.quantiles)
 
+    def _adap_thresholds(self, alpha: np.ndarray, marginal:bool):
+        """Score threshold of every class at significance level alpha adaptively."""
+        if marginal:
+            raise ValueError("Per-class alpha requires marginal=False; use a single float alpha for marginal sets.")
+        if len(alpha) != len(self.class_labels):
+            raise ValueError("alpha must be the same length as class_labels.")
 
+        self.quantiles = [self._conformal_quantile(scores, alpha[i])
+                          for i,scores in enumerate(self.calib_scores_per_label)]
+        return np.array(self.quantiles)
+    
     def _test_scores(self, test_HVs, **kwargs):
         ''' Nonconformity scores of every test HV against every class, shape (n_test, n_class). '''
         return self._class_scores(self._sim_matrix(test_HVs), self.score_type, **kwargs)
-
 
     def set_valued_CP(self, test_HVs, alpha,
                     allow_empty=True,
@@ -305,7 +313,8 @@ class ConformalHDC():
     def point_valued_CP(self, test_HVs, alpha,
                     allow_empty=True,
                     marginal=False, **kwargs):
-        ''' Trim the conformal prediction sets at significance level alpha to produce point prediction.
+        ''' 
+        Trim the conformal prediction sets at significance level alpha to produce point prediction.
 
             Args:
                 test_HVs: Input hypervectors
@@ -316,8 +325,14 @@ class ConformalHDC():
         '''
         if not self._is_calibrated():
             return
-
-        keep = self._test_scores(test_HVs, **kwargs) <= self._thresholds(alpha, marginal)
+        # prediction sets, when the score <= conformal scores
+        if isinstance(alpha, np.ndarray):
+            # adaptively choose alpha per class
+            keep = self._test_scores(test_HVs, **kwargs) <= self._adap_thresholds(alpha, marginal) # (n, nc) <= (nc, )
+        elif isinstance(alpha, float):
+            keep = self._test_scores(test_HVs, **kwargs) <= self._thresholds(alpha, marginal) # (n, nc) <= (nc, )
+        else:
+            raise TypeError("alpha must be an int or a np.ndarray")
         sims = self._sim_matrix(test_HVs) #(n, nc)
 
         # Trim each pset to its most similar class; argmax keeps the first of tied classes.
