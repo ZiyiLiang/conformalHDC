@@ -11,32 +11,13 @@ library(gridExtra)
 source("~/ConformalHDC/conformalHDC/experiments_real/plot/common.R")
 
 # CHANGE THIS!
-RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real_adaptive/results"
-OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real_adaptive/results/table'
+RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real_efficiency/results"
+OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table'
 
 
 #-------------------------------------------------------------------------------
 #                           Isolet Exp
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./isolet/" 
-
-# Pattern matches: seedX_alphaY.csv
-files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  isolet_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(isolet_data), "\n"))
-}
-
-#------------------
-# Table Generation 
-#------------------
 
 create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
   
@@ -57,16 +38,7 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
   
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    )
+  hdc_as_sets <-summary_vanilla_hdc(dat)
   
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
@@ -123,6 +95,7 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision = fmt(ap_u, ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
@@ -141,7 +114,7 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
                                       "Similarity", "CHDC-ratio", "CHDC-discount"))) 
   formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+    select(Method, Cov_std, Size_std, Accuracy, AveragePrecision, AUROC)
   formatted_set_compare = formatted%>%
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
@@ -151,7 +124,7 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
 
   export_latex_table(
     df = formatted_standard,
-    align_str = "l|l|cc|c|c|",
+    align_str ="|l|cc|cc|c|" ,
     header_cmd = header_standard,
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("isolet_table_alpha", target_alpha, ".tex") else "isolet_table.tex"
@@ -160,16 +133,20 @@ create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
-    align_str = "l|l|cc|cc|cc|",
+    align_str = "|l|cc|cc|cc|",
     header_cmd = header_set_compare,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
+    file_name = if (exists("target_alpha")) paste0("isolet_set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
   )
 }
 
 #------------------
 # Save Table 
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT) 
+isolet_data = load_exp_results(results_dir = "./isolet/" )
+
 table_dir <- paste0(OUT_ROOT, "/isolet")
 
 create_isolet_table(isolet_data, target_alpha = 0.05, save_dir = table_dir)
@@ -182,26 +159,7 @@ create_isolet_table(isolet_data, target_alpha = 0.02, save_dir = table_dir)
 #-------------------------------------------------------------------------------
 #                           MNIST Exp
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./mnist/" 
-
-# Pattern matches: seedX_alphaY.csv
-files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  mnist_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(mnist_data), "\n"))
-}
-
-#------------------
-# Table Generation 
-#------------------
-
+  
 create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -220,16 +178,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   # Treat HDC (vanilla_full) as producing a singleton set:
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    )
+  hdc_as_sets <- summary_vanilla_hdc(dat)
   
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
@@ -286,6 +235,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision = fmt(ap_u, ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
   
@@ -305,7 +255,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+    select(Method, Cov_std, Size_std, Accuracy,AveragePrecision, AUROC)
   formatted_set_compare = formatted%>%
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
 
@@ -314,7 +264,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
 
   export_latex_table(
     df = formatted_standard,
-    align_str = "l|l|cc|c|c|",
+    align_str = "|l|cc|cc|c|",
     header_cmd = header_standard,
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("mnist_table_alpha", target_alpha, ".tex") else "mnist_table.tex"
@@ -323,16 +273,20 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
-    align_str = "l|l|cc|cc|cc|",
+    align_str = "|l|cc|cc|cc|",
     header_cmd = header_set_compare,
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("mnist_set_compare_table_alpha", target_alpha, ".tex") else "mnist_set_compare_table.tex"
   )
 }
-
+ 
 #------------------
 # Save Table 
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT) 
+mnist_data= load_exp_results("./mnist/" )
+
 table_dir <- paste0(OUT_ROOT,'/mnist')
 
 # Generate for typical Alphas
@@ -343,25 +297,6 @@ create_mnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
 #-------------------------------------------------------------------------------
 #                           Fashion MNIST Exp
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./fashion_mnist/" 
-
-# Pattern matches: seedX_alphaY.csv
-files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  mnist_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(mnist_data), "\n"))
-}
-
-#------------------
-# Table Generation 
-#------------------
 
 create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
   
@@ -381,16 +316,7 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
   # Treat HDC (vanilla_full) as producing a singleton set:
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    )
+  hdc_as_sets <- summary_vanilla_hdc(dat)
   
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
@@ -447,6 +373,7 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision  = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
   
@@ -466,7 +393,7 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+    select(Method, Cov_std, Size_std, Accuracy,AveragePrecision, AUROC)
   formatted_set_compare = formatted%>%
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
@@ -475,54 +402,40 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
   
   export_latex_table(
     df = formatted_standard,
-    align_str = "l|l|cc|c|c|",
+    align_str = "|l|cc|cc|c|",
     header_cmd = header_standard,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("fmnist_table_alpha", target_alpha, ".tex") else "mnist_table.tex"
+    file_name = if (exists("target_alpha")) paste0("fmnist_table_alpha", target_alpha, ".tex") else "table.tex"
   )
   
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
-    align_str = "l|l|cc|cc|cc|",
+    align_str = "|l|cc|cc|cc|",
     header_cmd = header_set_compare,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("fmnist_set_compare_table_alpha", target_alpha, ".tex") else "mnist_set_compare_table.tex"
+    file_name = if (exists("target_alpha")) paste0("fmnist_set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
   )
 }
 
 #------------------
 # Save Table 
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT) 
+fmnist_data = load_exp_results("./fashion_mnist/" )
+
 table_dir <- paste0(OUT_ROOT,'/fashion_mnist')
 
 # Generate for typical Alphas
-create_fmnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
-create_fmnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
+create_fmnist_table(fmnist_data, target_alpha = 0.05, save_dir = table_dir)
+create_fmnist_table(fmnist_data, target_alpha = 0.1,  save_dir = table_dir)
 
 
 #-------------------------------------------------------------------------------
 #                         Languages Exp
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./languages/" 
 
-# Pattern matches: seedX_alphaY.csv
-files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  languages_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(languages_data), "\n"))
-}
-
-#------------------
-# Table Generation 
-#------------------
 create_languages_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha
@@ -541,16 +454,7 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
   # Treat HDC (vanilla_full) as producing a singleton set:
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    )
+  hdc_as_sets <- summary_vanilla_hdc(dat)
   
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
@@ -606,6 +510,7 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision  = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
@@ -624,7 +529,7 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+    select(Method, Cov_std, Size_std, Accuracy, AveragePrecision, AUROC)
   formatted_set_compare = formatted%>%
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
@@ -650,7 +555,7 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
     align_str = "l|l|cc|c|c|",
     header_cmd = header_standard,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("language_table_alpha", target_alpha, ".tex") else "isolet_table.tex"
+    file_name = if (exists("target_alpha")) paste0("language_table_alpha", target_alpha, ".tex") else "table.tex"
   )
   
   # Structure: Method | Cov Size | Cov Size | Cov Size
@@ -666,6 +571,10 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT) 
+languages_data = load_exp_results("./languages/" )
+
 table_dir <- paste0(OUT_ROOT,'/languages')
 create_languages_table(languages_data, target_alpha = 0.01, save_dir = table_dir)
 
@@ -674,26 +583,7 @@ create_languages_table(languages_data, target_alpha = 0.01, save_dir = table_dir
 #-------------------------------------------------------------------------------
 #                           PAMAP2 physical activity
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./pamap2/" 
-
-# Pattern matches: seedX_alphaY.csv
-files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  uci_har_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(uci_har_data), "\n"))
-}
-
-
-#------------------
-# Table Generation 
-#------------------ 
+ 
 create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -712,17 +602,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   # Treat HDC (vanilla_full) as producing a singleton set:
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    )
-  
+   hdc_as_sets <- summary_vanilla_hdc(dat)
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
@@ -778,6 +658,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
@@ -796,7 +677,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+    select(Method, Cov_std, Size_std, Accuracy, AveragePrecision,AUROC)
   formatted_set_compare = formatted%>%
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
@@ -804,53 +685,42 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   
   export_latex_table(
     df = formatted_standard,
-    align_str = "l|l|cc|c|c|",
+    align_str = "|l|cc|cc|c|",
     header_cmd = header_standard,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("pamap2_table_alpha", target_alpha, ".tex") else "uci_har_table.tex"
+    file_name = if (exists("target_alpha")) paste0("pamap2_table_alpha", target_alpha, ".tex") else "table.tex"
   )
   
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
-    align_str = "l|l|cc|cc|cc|",
+    align_str = "|l|cc|cc|cc|",
     header_cmd = header_set_compare,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("pamap2_set_compare_table_alpha", target_alpha, ".tex") else "uci_har_set_compare_table.tex"
+    file_name = if (exists("target_alpha")) paste0("pamap2_set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
   )
 } 
+
+ 
 #------------------
 # Save Table 
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT)
+results_dir <- "./pamap2/" 
+
+pampa2_data = load_exp_results("./pamap2/")
+
 table_dir <- paste0(OUT_ROOT,'/pamap2')
 
 # Generate for typical Alphas
-create_pamap2_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
-# create_pamap2_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
+create_pamap2_table(pampa2_data, target_alpha = 0.1, save_dir = table_dir)
+# create_pamap2_table(pampa2_data, target_alpha = 0.2,  save_dir = table_dir)
 
 #-------------------------------------------------------------------------------
 #                           UCI HAR Exp
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./uci_har/" 
-
-# Pattern matches: seedX_alphaY.csv
-files <- list.files(path = results_dir, pattern = "seed.*_alpha.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  uci_har_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(uci_har_data), "\n"))
-}
-
-
-#------------------
-# Table Generation 
-#------------------ 
+  
 create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -869,16 +739,7 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   # Treat HDC (vanilla_full) as producing a singleton set:
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    )
+  hdc_as_sets <- summary_vanilla_hdc(dat)
   
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
@@ -935,6 +796,7 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision      = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
@@ -953,15 +815,15 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AUROC)
+    select(Method, Cov_std, Size_std, Accuracy, AveragePrecision,AUROC)
   formatted_set_compare = formatted%>%
-    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
+    select(Method, Cov_std, Size_std, Cov_jk, Size_jk, Cov_fcp, Size_fcp)
   
   # --- F. Construct LaTeX Header ---
   
   export_latex_table(
     df = formatted_standard,
-    align_str = "l|l|cc|c|c|",
+    align_str =   "|l|cc|cc|c|",
     header_cmd = header_standard,
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("uci_har_table_alpha", target_alpha, ".tex") else "uci_har_table.tex"
@@ -970,7 +832,7 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
-    align_str = "l|l|cc|cc|cc|",
+    align_str =   "|l|cc|cc|cc|",
     header_cmd = header_set_compare,
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("uci_har_set_compare_table_alpha", target_alpha, ".tex") else "uci_har_set_compare_table.tex"
@@ -979,12 +841,16 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT) 
+uci_har_data = load_exp_results("./uci_har/" )
+
 table_dir <- paste0(OUT_ROOT,'/uci_har')
 
 # Generate for typical Alphas
 create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
-create_uci_har_table(uci_har_data, target_alpha = 0.15, save_dir = table_dir)
-create_uci_har_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
+# create_uci_har_table(uci_har_data, target_alpha = 0.15, save_dir = table_dir)
+# create_uci_har_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
 
 
 # 
@@ -1106,155 +972,136 @@ create_uci_har_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
 
 
 
-#-------------------------------------------------------------------------------
-#                           Combined Summary Table 
-#-------------------------------------------------------------------------------
-create_combined_table <- function(iso_df, mnist_df, lang_df, uci_df,
-                                  iso_alpha, mnist_alpha, lang_alpha, uci_alpha,
-                                  save_path = NULL) {
-  
-  # Internal helper to aggregate metrics for a specific dataset and alpha
-  get_summary <- function(df, target_alpha) {
-    dat <- df %>% 
-      filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
-      filter(score_type != "vanilla_train")
-    
-    # HDC Singleton Logic: Convert point accuracy to set coverage/size
-    hdc_pts <- dat %>%
-      filter(score_type == "vanilla_full", exp == "point_valued") %>%
-      mutate(exp = "set_valued", marginal = TRUE, score_type = "vanilla_full",
-             set_cov = point_acc, set_size = 1.0)
-    
-    dat <- dat %>% 
-      filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>% 
-      bind_rows(hdc_pts)
-    
-    dat %>%
-      group_by(score_type) %>%
-      summarise(
-        Cov = ifelse(all(is.na(set_cov[exp == "set_valued" & marginal])), "-", 
-                     sprintf("%.3f", mean(set_cov[exp == "set_valued" & marginal], na.rm=TRUE))),
-        Size = ifelse(all(is.na(set_size[exp == "set_valued" & marginal])), "-", 
-                      sprintf("%.3f", mean(set_size[exp == "set_valued" & marginal], na.rm=TRUE))),
-        AUROC = ifelse(all(is.na(ood_auroc[exp == "ood" & marginal])), "-", 
-                       sprintf("%.3f", mean(ood_auroc[exp == "ood" & marginal], na.rm=TRUE))),
-        .groups = "drop"
-      ) %>%
-      mutate(Method = case_when(
-        score_type == "vanilla_full" ~ "HDC",
-        score_type == "inverse_quantile" ~ "Inv. quantile",
-        score_type == "penalized" ~ "Penalized",
-        score_type == "sim" ~ "Similarity",
-        score_type == "ratio" ~ "CHDC-ratio",
-        score_type == "discount" ~ "CHDC-discount",
-        TRUE ~ score_type
-      ))
-  }
-  
-  # Generate Summaries
-  iso_summ <- get_summary(iso_df, iso_alpha)
-  mni_summ <- get_summary(mnist_df, mnist_alpha)
-  lng_summ <- get_summary(lang_df, lang_alpha)
-  uci_summ <- get_summary(uci_df, uci_alpha)
-  
-  # Join datasets: MNIST, Languages, ISOLET, UCI HAR
-  final_tab <- mni_summ %>%
-    select(Method, Cov_Mni = Cov, Size_Mni = Size, AUROC_Mni = AUROC) %>%
-    full_join(
-      lng_summ %>% select(Method, Cov_Lng = Cov, Size_Lng = Size, AUROC_Lng = AUROC),
-      by = "Method"
-    ) %>%
-    full_join(
-      iso_summ %>% select(Method, Cov_Iso = Cov, Size_Iso = Size, AUROC_Iso = AUROC),
-      by = "Method"
-    ) %>%
-    full_join(
-      uci_summ %>% select(Method, Cov_Uci = Cov, Size_Uci = Size, AUROC_Uci = AUROC),
-      by = "Method"
-    ) %>%
-    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
-                                      "Similarity", "CHDC-ratio", "CHDC-discount")))
-  
-  # LaTeX Formatting
-  # Alignment: Method (l) | MNIST (ccc) | Languages (ccc) | ISOLET (ccc) | UCI HAR (ccc)
-  align_str <- "l|l|ccc|ccc|ccc|ccc|"
-  
-  mni_head <- paste0("\\textbf{MNIST ($\\alpha=", mnist_alpha, "$)}")
-  lng_head <- paste0("\\textbf{Languages ($\\alpha=", lang_alpha, "$)}")
-  iso_head <- paste0("\\textbf{ISOLET ($\\alpha=", iso_alpha, "$)}")
-  uci_head <- paste0("\\textbf{UCI HAR ($\\alpha=", uci_alpha, "$)}")
-  
-  additor <- list(pos = list(0), command = paste0(
-    "\\hline\n",
-    " & \\multicolumn{3}{c|}{", mni_head, "} & \\multicolumn{3}{c|}{", lng_head, "} & \\multicolumn{3}{c|}{", iso_head, "} & \\multicolumn{3}{c|}{", uci_head, "} \\\\\n",
-    "\\cline{2-13}\n",
-    "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
-  ))
-  
-  ltx <- xtable(final_tab, align = align_str)
-  
-  print_args <- list(
-    x = ltx,
-    floating = FALSE,
-    include.rownames = FALSE,
-    include.colnames = FALSE,
-    sanitize.text.function = function(x) x,
-    add.to.row = additor,
-    hline.after = c(nrow(final_tab)),
-    comment = FALSE
-  )
-  
-  # Save/Print
-  if (!is.null(save_path)) {
-    if (!dir.exists(dirname(save_path))) dir.create(dirname(save_path), recursive = TRUE)
-    do.call(print, c(print_args, list(file = save_path)))
-    cat(paste("Saved combined tabular to:", save_path, "\n"))
-  } else {
-    do.call(print, print_args)
-  }
-}
-
-#------------------
-# Generate Table
-#------------------
-combined_path <- '../../results/tables/benchmark_dataset_summary.tex'
-
-create_combined_table(
-  iso_df = isolet_data, 
-  mnist_df = mnist_data, 
-  lang_df = languages_data, 
-  uci_df = uci_har_data,
-  iso_alpha = 0.02, 
-  mnist_alpha = 0.05, 
-  lang_alpha = 0.01, 
-  uci_alpha = 0.1, 
-  save_path = combined_path
-)
+# #-------------------------------------------------------------------------------
+# #                           Combined Summary Table 
+# #-------------------------------------------------------------------------------
+# create_combined_table <- function(iso_df, mnist_df, lang_df, uci_df,
+#                                   iso_alpha, mnist_alpha, lang_alpha, uci_alpha,
+#                                   save_path = NULL) {
+#   
+#   # Internal helper to aggregate metrics for a specific dataset and alpha
+#   get_summary <- function(df, target_alpha) {
+#     dat <- df %>% 
+#       filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
+#       filter(score_type != "vanilla_train")
+#     
+#     # HDC Singleton Logic: Convert point accuracy to set coverage/size
+#     hdc_pts <- dat %>%
+#       filter(score_type == "vanilla_full", exp == "point_valued") %>%
+#       mutate(exp = "set_valued", marginal = TRUE, score_type = "vanilla_full",
+#              set_cov = point_acc, set_size = 1.0)
+#     
+#     dat <- dat %>% 
+#       filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>% 
+#       bind_rows(hdc_pts)
+#     
+#     dat %>%
+#       group_by(score_type) %>%
+#       summarise(
+#         Cov = ifelse(all(is.na(set_cov[exp == "set_valued" & marginal])), "-", 
+#                      sprintf("%.3f", mean(set_cov[exp == "set_valued" & marginal], na.rm=TRUE))),
+#         Size = ifelse(all(is.na(set_size[exp == "set_valued" & marginal])), "-", 
+#                       sprintf("%.3f", mean(set_size[exp == "set_valued" & marginal], na.rm=TRUE))),
+#         AUROC = ifelse(all(is.na(ood_auroc[exp == "ood" & marginal])), "-", 
+#                        sprintf("%.3f", mean(ood_auroc[exp == "ood" & marginal], na.rm=TRUE))),
+#         .groups = "drop"
+#       ) %>%
+#       mutate(Method = case_when(
+#         score_type == "vanilla_full" ~ "HDC",
+#         score_type == "inverse_quantile" ~ "Inv. quantile",
+#         score_type == "penalized" ~ "Penalized",
+#         score_type == "sim" ~ "Similarity",
+#         score_type == "ratio" ~ "CHDC-ratio",
+#         score_type == "discount" ~ "CHDC-discount",
+#         TRUE ~ score_type
+#       ))
+#   }
+#   
+#   # Generate Summaries
+#   iso_summ <- get_summary(iso_df, iso_alpha)
+#   mni_summ <- get_summary(mnist_df, mnist_alpha)
+#   lng_summ <- get_summary(lang_df, lang_alpha)
+#   uci_summ <- get_summary(uci_df, uci_alpha)
+#   
+#   # Join datasets: MNIST, Languages, ISOLET, UCI HAR
+#   final_tab <- mni_summ %>%
+#     select(Method, Cov_Mni = Cov, Size_Mni = Size, AUROC_Mni = AUROC) %>%
+#     full_join(
+#       lng_summ %>% select(Method, Cov_Lng = Cov, Size_Lng = Size, AUROC_Lng = AUROC),
+#       by = "Method"
+#     ) %>%
+#     full_join(
+#       iso_summ %>% select(Method, Cov_Iso = Cov, Size_Iso = Size, AUROC_Iso = AUROC),
+#       by = "Method"
+#     ) %>%
+#     full_join(
+#       uci_summ %>% select(Method, Cov_Uci = Cov, Size_Uci = Size, AUROC_Uci = AUROC),
+#       by = "Method"
+#     ) %>%
+#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
+#                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
+#   
+#   # LaTeX Formatting
+#   # Alignment: Method (l) | MNIST (ccc) | Languages (ccc) | ISOLET (ccc) | UCI HAR (ccc)
+#   align_str <- "l|l|ccc|ccc|ccc|ccc|"
+#   
+#   mni_head <- paste0("\\textbf{MNIST ($\\alpha=", mnist_alpha, "$)}")
+#   lng_head <- paste0("\\textbf{Languages ($\\alpha=", lang_alpha, "$)}")
+#   iso_head <- paste0("\\textbf{ISOLET ($\\alpha=", iso_alpha, "$)}")
+#   uci_head <- paste0("\\textbf{UCI HAR ($\\alpha=", uci_alpha, "$)}")
+#   
+#   additor <- list(pos = list(0), command = paste0(
+#     "\\hline\n",
+#     " & \\multicolumn{3}{c|}{", mni_head, "} & \\multicolumn{3}{c|}{", lng_head, "} & \\multicolumn{3}{c|}{", iso_head, "} & \\multicolumn{3}{c|}{", uci_head, "} \\\\\n",
+#     "\\cline{2-13}\n",
+#     "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
+#     "\\hline\n"
+#   ))
+#   
+#   ltx <- xtable(final_tab, align = align_str)
+#   
+#   print_args <- list(
+#     x = ltx,
+#     floating = FALSE,
+#     include.rownames = FALSE,
+#     include.colnames = FALSE,
+#     sanitize.text.function = function(x) x,
+#     add.to.row = additor,
+#     hline.after = c(nrow(final_tab)),
+#     comment = FALSE
+#   )
+#   
+#   # Save/Print
+#   if (!is.null(save_path)) {
+#     if (!dir.exists(dirname(save_path))) dir.create(dirname(save_path), recursive = TRUE)
+#     do.call(print, c(print_args, list(file = save_path)))
+#     cat(paste("Saved combined tabular to:", save_path, "\n"))
+#   } else {
+#     do.call(print, print_args)
+#   }
+# }
+# 
+# #------------------
+# # Generate Table
+# #------------------
+# combined_path <- '../../results/tables/benchmark_dataset_summary.tex'
+# 
+# create_combined_table(
+#   iso_df = isolet_data, 
+#   mnist_df = mnist_data, 
+#   lang_df = languages_data, 
+#   uci_df = uci_har_data,
+#   iso_alpha = 0.02, 
+#   mnist_alpha = 0.05, 
+#   lang_alpha = 0.01, 
+#   uci_alpha = 0.1, 
+#   save_path = combined_path
+# )
 
 
 #-------------------------------------------------------------------------------
 #                           Odor Decoding Exp
 #-------------------------------------------------------------------------------
-# Set your results directory here
-setwd(RESULT_ROOT)
-results_dir <- "./odor_decoding/" 
-
-# Pattern matches: ratX_seedY_alphaZ_betaW.csv
-files <- list.files(path = results_dir, pattern = "rat.*_seed.*_alpha.*_beta.*\\.csv", 
-                    full.names = TRUE, recursive = TRUE)
-
-if (length(files) == 0) {
-  warning("No result files found! Check your directory path.")
-} else {
-  odor_data <- files %>% 
-    map_df(~read_csv(., show_col_types = FALSE))
-  cat(paste("Loaded", length(files), "files. Total rows:", nrow(odor_data), "\n"))
-}
-
-#------------------
-# Table Generation 
-#------------------ 
 
 create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
   
@@ -1329,6 +1176,7 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
       Accuracy      = fmt(acc_u,     acc_se),
+      AveragePrecision  = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     ) %>% 
     mutate( 
@@ -1348,7 +1196,7 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
             factor(Method, levels = c("HDC (train)", "HDC", "Inv. quantile", 
                                       "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted %>%
-    select(rat,Method, Cov_std, Size_std, Accuracy, AUROC) %>%
+    select(rat,Method, Cov_std, Size_std, Accuracy, AveragePrecision, AUROC) %>%
     group_by(rat) %>%
     mutate(rat = if_else(
       row_number() == 1, 
@@ -1506,10 +1354,15 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
 #------------------
 # Execution
 #------------------
+# Set your results directory here
+setwd(RESULT_ROOT) 
+odor_data = load_exp_results(
+  results_dir =  "./odor_decoding/", 
+  pattern = "rat.*_seed.*_alpha.*_beta.*\\.csv", )
+
 table_dir <- paste0(OUT_ROOT,'/odor_decoding')
 
 create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
-
 create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 
 

@@ -1,8 +1,47 @@
 
 #-------------------------------------------------------------------------------
-#                           Common functions
+#                           load functions
+#------------------------------------------------------------------------------- 
+load_exp_results <- function(results_dir, pattern = "seed.*_alpha.*\\.csv"){ 
+  
+  # Pattern matches: seedX_alphaY.csv
+  files <- list.files(path = results_dir, pattern = pattern, 
+                      full.names = TRUE, recursive = TRUE)
+  
+  if (length(files) == 0) {
+    warning("No result files found! Check your directory path.")
+  } else {
+    data <- files %>% 
+      map_df(~read_csv(., show_col_types = FALSE))
+    cat(paste("Loaded", length(files), "files. Total rows:", nrow(data), "\n"))
+  }
+  return(data)
+}
+
+#-------------------------------------------------------------------------------
+#                           summary functions
 #-------------------------------------------------------------------------------
 
+# Treat HDC (vanilla_full) as producing a singleton set:
+#   - Set Coverage = Point Accuracy
+#   - Set Size     = 1.0
+summary_vanilla_hdc <- function(data){
+
+  return(
+    data %>%
+    filter(score_type == "vanilla_full", exp == "point_valued") %>%
+    select(random_state, point_acc, macro_ap,macro_auprc, any_of(c("alpha", "sigma"))) %>%    
+    mutate(
+      exp = "set_valued",
+      marginal = TRUE,
+      score_type = "vanilla_full",
+      set_cov = point_acc, # Coverage becomes Accuracy
+      set_size = 1.0       # Size is always 1
+    ))
+  
+}
+
+# Conformal HDC
 summary_set_val<- function(data, ...){
   return(
     data %>%     
@@ -28,6 +67,10 @@ summary_point_val <- function(data, ...){
         n = n(),
         acc_u = mean(point_acc, na.rm=TRUE), 
         acc_se = sd(point_acc, na.rm=TRUE) / sqrt(n),
+        ap_u = mean(macro_ap, na.rm=TRUE), 
+        ap_se = sd(macro_ap, na.rm=TRUE) / sqrt(n), 
+        auprc_u = mean(macro_auprc, na.rm=TRUE), 
+        auprc_se = sd(macro_auprc, na.rm=TRUE) / sqrt(n),
         .groups = "drop"
       )
   )
@@ -57,18 +100,21 @@ summary_ood_val <- function(data, ...){
 # Vectorized helper function
 fmt <- function(u, se) ifelse(is.na(u), "-", sprintf("%.3f (%.3f)", u, se))
 
-
 header_standard <- paste0(
   "\\hline\n",
-  " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
-  "\\cline{2-5}\n",
-  "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
+  " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}}",
+  " & \\multicolumn{2}{c|}{\\textbf{Point}}",         
+  " & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",  
+  "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size}",
+  " & \\textbf{Accuracy} & \\textbf{Average Precision}",  
+  " & \\textbf{AUC} \\\\\n",
   "\\hline\n"
 )
+
+
 header_set_compare <- paste0(
   "\\hline\n",
-  " & \\multicolumn{2}{c|}{\\textbf{Standard}} & \\multicolumn{2}{c|}{\\textbf{Jackknife}} & \\multicolumn{2}{c|}{\\textbf{FCP}} \\\\\n",
-  "\\cline{2-7}\n",
+  " & \\multicolumn{2}{c|}{\\textbf{Standard}} & \\multicolumn{2}{c|}{\\textbf{Jackknife}} & \\multicolumn{2}{c|}{\\textbf{FCP}} \\\\\n", 
   "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Coverage} & \\textbf{Size} \\\\\n",
   "\\hline\n"
 )
@@ -85,7 +131,7 @@ export_latex_table <- function(df, align_str, header_cmd,
   }
   
   additor <- list(pos = list(0), command = header_cmd)
-  ltx <- xtable::xtable(df, align = align_str)
+  ltx <- xtable::xtable(df, align = paste0("r", align_str))
   
   # Print / Save logic
   if (!is.null(save_dir) && !is.null(file_name)) {

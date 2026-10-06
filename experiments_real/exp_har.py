@@ -15,9 +15,6 @@ LABELS_OOD = [3, 4, 5]
 LEVELS = 21
 TEST_SIZE = 0.1
 
-# TODO: runtime CSV (seed*_runtime.csv read by make_plots.R). Re-add timing of the
-# encoding, prototype, calibration and prediction stages once the timing design is settled.
-
 
 @lru_cache(maxsize=1)
 def load_levels():

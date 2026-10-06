@@ -1,20 +1,17 @@
-"""Shared harness for the real-data conformal HDC experiments.
-
-Each experiment script supplies its data loading and encoding plus a
-``run_single_experiment(random_state, alpha)`` that returns ``results_frame(rows)``;
-this module turns encoded hypervectors into result rows and runs the repetitions.
+"""
+Shared common functions for the real-data conformal HDC experiments.
+Each experiment script supplies its data loading and encoding policy.
 """
 import os
 import sys
 import traceback
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import average_precision_score, auc, f1_score, precision_recall_curve, roc_auc_score
 from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -24,17 +21,20 @@ from conformal_inference.methods import CachedConformalHDC, ConformalHDC
 from conformal_inference.utils import eval_accuracy, eval_lc_accuracy
 from data.config import RESULTS_ROOT
 from hdc_encoder.level import encode_levels, make_im_cim
+from hdc_encoder.image import encode_binary_images, make_position_hvs
 
-REPETITIONS = 4 
+REPETITIONS = 4
 SCORE_TYPES = ["sim", "ratio", "discount", "penalized", "inverse_quantile"]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Worker processes for jackknife+ and full conformal: the cores Slurm granted (1 outside Slurm)
 N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
 # Column order of every results CSV; metrics a row does not report are NaN.
 COLUMNS = ["exp", "method", "random_state", "score_type", "alpha", "marginal",
-           "set_cov", "set_size", "lc_covs", "point_acc", "lc_accs", "ood_auroc"]
+           "set_cov", "set_size", "lc_covs", "point_acc", "lc_accs", "ood_auroc",
+           "macro_ap", "macro_auprc", "macro_f1"]
 
 
+# Experimental utilities
 def log(message):
     print(message, flush=True)
 
@@ -103,17 +103,17 @@ def coordinate_ascent(objective, n_class, n_grid, max_passes=10):
 
 def adaptive_alpha(chdc, calib_hvs, calib_y, LABELS_ID, max_passes=10):
     """Per-class alpha maximizing overall calibration accuracy of the point predictor."""
-    
+
     ALPHA_GRID = np.array([0.01, 0.05, 0.1, 0.15, 0.2])  # ascending: ties go to the smaller alpha
 
     masked, fallback = masked_sims_table(chdc, calib_hvs, ALPHA_GRID)
     y_idx = np.array([chdc.label_to_idx[l] for l in np.asarray(calib_y).tolist()])
-    # evaluate the overall accuracy for each grid 
+    # evaluate the overall accuracy for each grid
     objective = lambda idx: eval_accuracy(trimmed_predictions(masked, fallback, idx), y_idx)
     return ALPHA_GRID[coordinate_ascent(objective, len(LABELS_ID), len(ALPHA_GRID), max_passes)]
 
 ################======== Metrics ========################
-
+# Set performance metrics
 def set_metrics(sets, y, labels):
     covered = np.array([label in pset for label, pset in zip(y, sets)])
     # Label conditional coverage over the classes present in y
@@ -125,21 +125,43 @@ def set_metrics(sets, y, labels):
     }
 
 
-def point_metrics(preds, y, labels):
-    preds = np.array(preds).ravel()
-    return {"point_acc": eval_accuracy(preds, y),
-            "lc_accs": eval_lc_accuracy(preds, y, labels)}
+# Point performance metrics, score columns follow the supplied class-label order
+def ranking_metrics(y, scores, labels):
+    """ Equal-weight average AP and AUPRC area."""
+    y, scores, labels = np.asarray(y).ravel(), np.asarray(scores), list(labels)
 
+    aps, areas = [], []
+    for c, label in enumerate(labels):
+        positive = y == label
+        if not positive.any() or positive.all():
+            # The macro average is undefined when a class cannot be evaluated.
+            return {"macro_ap": np.nan, "macro_auprc": np.nan}
+        precision, recall, _ = precision_recall_curve(positive, scores[:, c])
+        aps.append(average_precision_score(positive, scores[:, c]))
+        areas.append(auc(recall, precision))
+    return {"macro_ap": np.mean(aps), "macro_auprc": np.mean(areas)}
 
+def point_metrics(preds, y, labels, scores):
+    """Hard-prediction accuracy/F1 plus ranking metrics from continuous scores."""
+    preds, y, labels = np.asarray(preds).ravel(), np.asarray(y).ravel(), list(labels)
+    if not np.isin(preds, labels).all():
+        raise ValueError("Predictions must belong to the supplied classes.")
+    return {
+        "point_acc": eval_accuracy(preds, y),
+        "lc_accs": eval_lc_accuracy(preds, y, labels),
+        "macro_f1": f1_score(y, preds, labels=labels, average="macro", zero_division=0),
+        **ranking_metrics(y, scores, labels),
+    }
+
+# OOD performance metrics
 def ood_auroc(p_id, p_ood):
     """AUROC of separating in-distribution (positive) from OOD samples by p-value."""
     y_true = np.concatenate([np.ones(len(p_id)), np.zeros(len(p_ood))])
     return roc_auc_score(y_true, np.concatenate([p_id, p_ood]))
 
-
 ################======== Result rows ========################
-
-def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_state, alpha):
+def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_state, alpha,
+                   completion_message="Finished running ConformalHDC."):
     """Set-valued, point-valued and OOD rows for every score type.
 
     chdc: split-conformal model on train prototypes (similarities cached for cal/test/OOD).
@@ -170,31 +192,29 @@ def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_st
         preds = chdc.point_valued_CP(test_hvs, adap_alpha, allow_empty=False, marginal=False)
         # static alpha
         #  preds = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
-        rows.append({"exp": "point_valued", **shared, **point_metrics(preds, test_y, labels)})
+        rows.append({"exp": "point_valued", **shared,
+                     **point_metrics(preds, test_y, labels, chdc.get_class_p_values(test_hvs))})
 
         # 3. OOD Detection
         for marginal in [True, False]:
             auroc = ood_auroc(chdc.get_max_p_value(test_hvs, marginal=marginal),
                               chdc.get_max_p_value(ood_hvs, marginal=marginal))
             rows.append({"exp": "ood", "marginal": marginal, **shared, "ood_auroc": auroc})
-    log("Finished running ConformalHDC.")
+    log(completion_message)
     return rows
 
 
-def vanilla_rows(prototypes, labels, test, random_state, alpha):
-    """Point-valued rows of plain nearest-prototype HDC, one per {score_type: prototypes}."""
+def vanilla_rows(models, test, random_state, alpha):
+    """Evaluate vanilla models, retaining their similarity and cache policies."""
     test_hvs, test_y = test
     rows = []
-    for name, class_HVs in prototypes.items():
-        model = ConformalHDC(class_HVs, labels, sim_measure="cosine", random_state=random_state)
+    for name, model in models.items():
         rows.append({"exp": "point_valued", "random_state": random_state, "score_type": name,
-                     "alpha": alpha, **point_metrics(model.predict(test_hvs), test_y, labels)})
+                     "alpha": alpha, **point_metrics(
+                         model.predict(test_hvs), test_y, model.class_labels, model._sim_matrix(test_hvs),
+                     )})
     log("Finished running vanilla HDC.")
     return rows
-
-
-def results_frame(rows, columns=COLUMNS):
-    return pd.DataFrame(rows, columns=columns)
 
 
 def evaluate(train, cal, test, ood_hvs, labels, rule, random_state, alpha):
@@ -218,14 +238,78 @@ def evaluate(train, cal, test, ood_hvs, labels, rule, random_state, alpha):
         conformal.full_conformal_sets(alpha, SCORE_TYPES),
         random_state, alpha,
     )
-    rows += vanilla_rows(
-        {"vanilla_train": protos_train, "vanilla_full": conformal.prototypes},
-        labels, test, random_state, alpha,
+    models = {
+        name: ConformalHDC(prototypes, labels, sim_measure="cosine", random_state=random_state)
+        for name, prototypes in {"vanilla_train": protos_train,
+                                 "vanilla_full": conformal.prototypes}.items()
+    }
+    rows += vanilla_rows(models, test, random_state, alpha)
+    return pd.DataFrame(rows, columns=COLUMNS)
+
+
+################======== binary encoded images experiment flows ========################
+
+def prepare_binary_images(datasets):
+    """Flatten concatenated datasets and apply the original /255 pixel threshold."""
+    pixels = torch.cat([d.data for d in datasets]).flatten(1)
+    labels = torch.cat([d.targets for d in datasets]).numpy()
+    return pixels.float().div(255) >= 0.5, labels
+
+
+def balanced_indices(targets, rng):
+    """Subsample each class, in sorted label order, to the smallest class size."""
+    class_indices = [np.flatnonzero(targets == c) for c in np.unique(targets)]
+    if not class_indices:
+        raise ValueError("Image targets must be nonempty.")
+    min_count = min(map(len, class_indices))
+    return np.concatenate([rng.choice(idxs, min_count, replace=False) for idxs in class_indices])
+
+
+def image_split_indices(targets, labels_id, labels_ood, random_state):
+    """Balanced ID train/calibration/test (80/15/5%) and untrimmed OOD indices."""
+    balanced = balanced_indices(targets, np.random.RandomState(random_state))
+    id_idx = balanced[np.isin(targets[balanced], labels_id)]
+    ood_idx = balanced[np.isin(targets[balanced], labels_ood)]
+    n_total = len(id_idx)
+    n_train, n_calib = int(0.8 * n_total), int(0.15 * n_total)
+    splits = random_split(
+        range(n_total), [n_train, n_calib, n_total - n_train - n_calib],
+        generator=torch.Generator().manual_seed(random_state),
     )
-    return results_frame(rows)
+    return [id_idx[split.indices] for split in splits] + [ood_idx]
 
 
-################======== Shared experiment flows ========################
+def run_image_experiment(pixels, targets, labels_id, labels_ood, random_state, alpha,
+                         dim=10_000, batch_size=512, replay_passes=False):
+    """One binary-image repetition; replay_passes retains MNIST's loader history."""
+    if pixels.ndim != 2 or len(pixels) != len(targets):
+        raise ValueError("Flattened images and targets must have matching sample counts.")
+    if dim <= 0 or batch_size <= 0:
+        raise ValueError("Dimension and batch size must be positive.")
+    seed_everything(random_state)
+    splits = image_split_indices(targets, labels_id, labels_ood, random_state)
+    train_idx, cal_idx, test_idx, ood_idx = splits
+    pos_hvs = make_position_hvs(pixels.shape[1], dim, DEVICE)
+    passes = [(len(train_idx), True)]
+    if replay_passes:
+        # Preserve MNIST's original RNG draws before its final training pass.
+        passes += [(len(train_idx) + len(cal_idx), True), (len(cal_idx), False),
+                   (len(test_idx), False), (len(ood_idx), False), (len(train_idx), True)]
+    train_order = loader_orders(passes, batch_size)[-1]
+
+    def encode(indices):
+        return encode_binary_images(pixels[indices], pos_hvs, batch_size), targets[indices]
+
+    train = encode(train_idx[train_order])
+    cal, test = encode(cal_idx), encode(test_idx)
+    ood_hvs, _ = encode(balance_ood(ood_idx, len(test_idx)))
+    log("Encoding complete.")
+    return evaluate(train, cal, test, ood_hvs, labels_id, "bipolar", random_state, alpha)
+
+
+################======== Image experiment flows ========################
+
+# Level-encoded experiment flow
 
 def run_level_experiment(L, y, labels_id, labels_ood, test_size, levels, random_state, alpha,
                          dim=10_000):

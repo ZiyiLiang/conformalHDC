@@ -378,6 +378,20 @@ class ConformalHDC():
             ranks = np.searchsorted(all_calib, min_test_scores, side='left')
             return (n_calib - ranks + 1) / (n_calib + 1)
 
+        return np.max(self._label_conditional_p_values(test_scores_matrix), axis=1)
+
+    def get_class_p_values(self, test_HVs, **kwargs):
+        """Label-conditional p-values, shape (n, n_class), in class_labels order.
+
+        Larger values indicate greater class support; these are not normalized
+        probabilities. Classes without calibration observations receive zero,
+        matching the existing OOD p-value convention.
+        """
+        if not self._is_calibrated():
+            return
+        return self._label_conditional_p_values(self._test_scores(test_HVs, **kwargs))
+
+    def _label_conditional_p_values(self, test_scores_matrix):
         p_values_matrix = np.zeros(test_scores_matrix.shape)
         for c_idx in self.canonical_indices:
             calib_c = np.sort(self.calib_scores_per_label[c_idx])
@@ -388,8 +402,7 @@ class ConformalHDC():
             ranks = np.searchsorted(calib_c, test_scores_matrix[:, c_idx], side='left')
             p_values_matrix[:, c_idx] = (n_calib - ranks + 1) / (n_calib + 1)
 
-        # Return the best p-value across all possible classes
-        return np.max(p_values_matrix, axis=1)
+        return p_values_matrix
 
     def predict(self, test_HVs):
         test_HVs = np.asarray(test_HVs)
