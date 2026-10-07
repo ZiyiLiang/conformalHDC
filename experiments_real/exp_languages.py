@@ -13,7 +13,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from data.load import load_languages_data
 from hdc_encoder.text import TrigramEncoder
 from experiments_real.common import (
-    DEVICE, balance_ood, evaluate, loader_orders, log, main, seed_everything,
+    DEVICE, balance_ood, evaluate, loader_orders, log, main, seed_everything, timed,
 )
 
 # Fixed Constants
@@ -92,9 +92,12 @@ def run_single_experiment(random_state, alpha):
     encoder = TrigramEncoder(DIMENSIONS).to(DEVICE)
     # The shuffled train loader was the first pass after creating the encoder;
     train_order, = loader_orders([(len(train_idx), True)], LOADER_BATCH_SIZE)
-    train = encode(train_idx[train_order], encoder)
-    cal = encode(calib_idx, encoder)
-    test = encode(test_idx, encoder)
+    with timed("encode_train"):
+        train = encode(train_idx[train_order], encoder)
+    with timed("encode_cal"):
+        cal = encode(calib_idx, encoder)
+    with timed("encode_test"):
+        test = encode(test_idx, encoder)
     ood_hvs, _ = encode(balance_ood(ood_idx, len(test_idx)), encoder)
     log("Encoding complete.")
     df = evaluate(train, cal, test, ood_hvs, labels_id, "normalized", random_state, alpha)

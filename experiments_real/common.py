@@ -4,7 +4,10 @@ Each experiment script supplies its data loading and encoding policy.
 """
 import os
 import sys
+import time
 import traceback
+from contextlib import contextmanager
+from functools import cache
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -32,11 +35,65 @@ N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
 COLUMNS = ["exp", "method", "random_state", "score_type", "alpha", "marginal",
            "set_cov", "set_size", "lc_covs", "point_acc", "lc_accs", "ood_auroc",
            "macro_ap", "macro_auprc", "macro_f1"]
+# Runtime table (seconds per repetition): one row per conformal method and score type.
+TIMING_COLUMNS = ["random_state", "alpha", "method", "score_type", "n_test",
+                  "training", "calibration", "encoding", "hdc", "conformal",
+                  "device", "cpu", "n_jobs"]
+TIMING = False  # set by main(timing=True); timed() is a no-op otherwise
+_TIMES = {}  # stage -> wall seconds of the current repetition, filled by timed()
 
 
 # Experimental utilities
 def log(message):
     print(message, flush=True)
+
+
+def sync_gpu():
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+
+
+@contextmanager
+def timed(stage):
+    """Record the block's wall time as _TIMES[stage], including queued GPU work."""
+    if not TIMING:
+        yield
+        return
+    sync_gpu()
+    start = time.perf_counter()
+    yield
+    sync_gpu()
+    _TIMES[stage] = time.perf_counter() - start
+
+
+@cache
+def hardware():
+    """Compute environment reported with every runtime row."""
+    device = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
+    with open("/proc/cpuinfo") as f:
+        cpu = next(l.split(":", 1)[1].strip() for l in f if l.startswith("model name"))
+    return {"device": device, "cpu": cpu, "n_jobs": N_JOBS}
+
+
+def timing_frame(random_state, alpha):
+    """Runtime rows of the repetition recorded in _TIMES.
+
+    training: train + calibration encoding and prototyping; calibration: calibration
+    scores (plus the adaptive-alpha search for point prediction); encoding / hdc: test
+    encoding and vanilla HDC inference; conformal: overhead on top of HDC inference.
+    Jackknife+ and full conformal score every type in one pass, so their rows are "all".
+    """
+    t = _TIMES
+    base = {"random_state": random_state, "alpha": alpha, "n_test": t["n_test"],
+            "training": t["encode_train"] + t["encode_cal"] + t["prototypes"],
+            "encoding": t["encode_test"], "hdc": t["hdc"], **hardware()}
+    rows = [{**base, "method": method, "score_type": s,
+             "calibration": t[f"calib_{s}"] + t[f"adaptive_{s}"] * (method == "point_valued"),
+             "conformal": t[f"{method}_{s}"]}
+            for s in SCORE_TYPES for method in ["split_marginal", "split_conditional", "point_valued"]]
+    rows += [{**base, "method": method, "score_type": "all", "calibration": np.nan,
+              "conformal": t["fast_init"] + t[method]} for method in ["jackknife_plus", "full_conformal"]]
+    return pd.DataFrame(rows, columns=TIMING_COLUMNS)
 
 
 def seed_everything(random_state):
@@ -172,13 +229,18 @@ def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_st
     shared = {"random_state": random_state, "alpha": alpha}
     rows = []
     for stype in SCORE_TYPES:
-        chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
+        with timed(f"calib_{stype}"):
+            chdc.compute_calib_scores(cal_hvs, cal_y, score_type=stype)
         shared["score_type"] = stype
 
         # 1. Set-Valued Prediction
+        with timed(f"split_marginal_{stype}"):
+            marg_sets = chdc.set_valued_CP(test_hvs, alpha, marginal=True)
+        with timed(f"split_conditional_{stype}"):
+            cond_sets = chdc.set_valued_CP(test_hvs, alpha, marginal=False)
         for method, marginal, sets in [
-            ("split_conformal", True, chdc.set_valued_CP(test_hvs, alpha, marginal=True)),
-            ("split_conformal", False, chdc.set_valued_CP(test_hvs, alpha, marginal=False)),
+            ("split_conformal", True, marg_sets),
+            ("split_conformal", False, cond_sets),
             ("jackknife_plus", True, jk_sets[stype]),
             ("full_conformal", True, fc_sets[stype]),
         ]:
@@ -187,9 +249,11 @@ def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_st
 
         # 2. Point-Valued Prediction
         #NOTE adaptive alpha
-        adap_alpha = adaptive_alpha(chdc, cal_hvs, cal_y, labels)
+        with timed(f"adaptive_{stype}"):
+            adap_alpha = adaptive_alpha(chdc, cal_hvs, cal_y, labels)
         # compute the score to choose alpha based on lc acc, then input the alpha list to this function to compute acc.
-        preds = chdc.point_valued_CP(test_hvs, adap_alpha, allow_empty=False, marginal=False)
+        with timed(f"point_valued_{stype}"):
+            preds = chdc.point_valued_CP(test_hvs, adap_alpha, allow_empty=False, marginal=False)
         # static alpha
         #  preds = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
         rows.append({"exp": "point_valued", **shared,
@@ -224,25 +288,29 @@ def evaluate(train, cal, test, ood_hvs, labels, rule, random_state, alpha):
     conformal and vanilla_full use train + calibration. `rule` is the prototype
     rule of conformal_inference.fast ("bipolar", "ternary" or "normalized").
     """
-    protos_train = class_prototypes(*train, labels, rule)
-    conformal = FastConformal(*development_set(train, cal), test[0], labels, rule,
-                              random_state=random_state, n_jobs=N_JOBS)
+    _TIMES["n_test"] = len(test[1])
+    with timed("prototypes"):
+        protos_train = class_prototypes(*train, labels, rule)
+    with timed("fast_init"):
+        conformal = FastConformal(*development_set(train, cal), test[0], labels, rule,
+                                  random_state=random_state, n_jobs=N_JOBS)
     log("Prototypes built.")
     chdc = CachedConformalHDC(
         class_HVs=protos_train, class_labels=labels,
         sim_measure="cosine", random_state=random_state,
     ).cache_similarities(cal[0], test[0], ood_hvs)  # re-use the similarities for every score type
-    rows = conformal_rows(
-        chdc, cal, test, ood_hvs, labels,
-        conformal.jackknife_sets(alpha, SCORE_TYPES),
-        conformal.full_conformal_sets(alpha, SCORE_TYPES),
-        random_state, alpha,
-    )
+    with timed("jackknife_plus"):
+        jk_sets = conformal.jackknife_sets(alpha, SCORE_TYPES)
+    with timed("full_conformal"):
+        fc_sets = conformal.full_conformal_sets(alpha, SCORE_TYPES)
+    rows = conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_state, alpha)
     models = {
         name: ConformalHDC(prototypes, labels, sim_measure="cosine", random_state=random_state)
         for name, prototypes in {"vanilla_train": protos_train,
                                  "vanilla_full": conformal.prototypes}.items()
     }
+    with timed("hdc"):  # vanilla HDC inference, similarities computed afresh
+        models["vanilla_train"].predict(test[0])
     rows += vanilla_rows(models, test, random_state, alpha)
     return pd.DataFrame(rows, columns=COLUMNS)
 
@@ -300,8 +368,12 @@ def run_image_experiment(pixels, targets, labels_id, labels_ood, random_state, a
     def encode(indices):
         return encode_binary_images(pixels[indices], pos_hvs, batch_size), targets[indices]
 
-    train = encode(train_idx[train_order])
-    cal, test = encode(cal_idx), encode(test_idx)
+    with timed("encode_train"):
+        train = encode(train_idx[train_order])
+    with timed("encode_cal"):
+        cal = encode(cal_idx)
+    with timed("encode_test"):
+        test = encode(test_idx)
     ood_hvs, _ = encode(balance_ood(ood_idx, len(test_idx)))
     log("Encoding complete.")
     return evaluate(train, cal, test, ood_hvs, labels_id, "bipolar", random_state, alpha)
@@ -326,9 +398,12 @@ def run_level_experiment(L, y, labels_id, labels_ood, test_size, levels, random_
     log(f"ID: {len(X_train)} train, {len(X_cal)} calib, {len(X_test)} test.")
 
     iM, CiM = make_im_cim(L.shape[1], levels, dim, DEVICE)
-    train = encode_levels(X_train, iM, CiM), y_train
-    cal = encode_levels(X_cal, iM, CiM), y_cal
-    test = encode_levels(X_test, iM, CiM), y_test
+    with timed("encode_train"):
+        train = encode_levels(X_train, iM, CiM), y_train
+    with timed("encode_cal"):
+        cal = encode_levels(X_cal, iM, CiM), y_cal
+    with timed("encode_test"):
+        test = encode_levels(X_test, iM, CiM), y_test
     ood_hvs = encode_levels(balance_ood(L[np.isin(y, labels_ood)], len(X_test)), iM, CiM)
     log("Encoding complete.")
     return evaluate(train, cal, test, ood_hvs, labels_id, "ternary", random_state, alpha)
@@ -336,7 +411,7 @@ def run_level_experiment(L, y, labels_id, labels_ood, test_size, levels, random_
 
 ################======== Main Execution ========################
 
-def main(run_single_experiment, exp_name):
+def main(run_single_experiment, exp_name, timing=False):
     """Run REPETITIONS seeds of one seed group and save them to RESULTS_ROOT/<exp_name>/."""
     if len(sys.argv) != 3:
         log(f"Usage: python {Path(sys.argv[0]).name} <seed_group_id> <alpha>")
@@ -347,12 +422,17 @@ def main(run_single_experiment, exp_name):
     outfile = out_dir / f"seed{seed_arg}_alpha{alpha_arg}.csv"
     log(f"Starting job: Seed Group {seed_arg}, Alpha {alpha_arg}, Reps {REPETITIONS}")
 
-    results = []
+    global TIMING
+    TIMING = timing  # also write timing_<outfile> with the runtime breakdown
+    results, timings = [], []
     for i in tqdm(range(1, REPETITIONS + 1), desc="Repetitions"):
         state = REPETITIONS * (seed_arg - 1) + i
         log(f"Running repetition {i}...")
+        _TIMES.clear()
         try:
             results.append(run_single_experiment(state, alpha_arg))
+            if timing:
+                timings.append(timing_frame(state, alpha_arg))
         except Exception:
             log(f"Error in state {state}:")
             traceback.print_exc()
@@ -361,5 +441,9 @@ def main(run_single_experiment, exp_name):
     if results:
         pd.concat(results, ignore_index=True).to_csv(outfile, index=False)
         log(f"\nResults saved to {outfile}")
+    if timings:
+        timefile = out_dir / f"timing_{outfile.name}"
+        pd.concat(timings, ignore_index=True).to_csv(timefile, index=False)
+        log(f"Timings saved to {timefile}")
     else:
         log("No results generated.")

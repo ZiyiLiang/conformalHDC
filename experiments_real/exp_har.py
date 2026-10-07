@@ -29,4 +29,4 @@ def run_single_experiment(random_state, alpha):
 
 
 if __name__ == "__main__":
-    main(run_single_experiment, EXP_NAME)
+    main(run_single_experiment, EXP_NAME, timing=True)  # HAR is the runtime example

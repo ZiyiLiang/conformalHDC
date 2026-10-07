@@ -11,7 +11,7 @@ ALPHA_LIST=(0.1)
 # ALPHA_LIST=(0.1 0.15 0.2)
 
 # Slurm parameters
-EXPNAME="uci_har"
+EXPNAME="uci_har_timing"
 MEMO=8G                            
 TIME=00-03:00:00                 
 CORE=1                        

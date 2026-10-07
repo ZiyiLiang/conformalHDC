@@ -552,7 +552,7 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
   
   export_latex_table(
     df = formatted_standard,
-    align_str = "l|l|cc|c|c|",
+    align_str = "|l|cc|cc|c|",
     header_cmd = header_standard,
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("language_table_alpha", target_alpha, ".tex") else "table.tex"
@@ -561,10 +561,10 @@ create_languages_table <- function(df, target_alpha, save_dir = NULL) {
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
-    align_str = "l|l|cc|cc|cc|",
+    align_str = "|l|cc|cc|cc|",
     header_cmd = header_set_compare,
     save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
+    file_name = if (exists("target_alpha")) paste0("language_set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
   )
 }
 
@@ -849,6 +849,11 @@ table_dir <- paste0(OUT_ROOT,'/uci_har')
 
 # Generate for typical Alphas
 create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
+
+# Runtime breakdown (timing_seed*.csv written next to the result CSVs)
+uci_har_timing = load_exp_results("./uci_har/", pattern = "^timing_seed.*_alpha.*\\.csv$")
+create_runtime_table(uci_har_timing, target_alpha = 0.1, n_test = 468, save_dir = table_dir,
+                     file_name = "uci_har_runtime.tex")
 # create_uci_har_table(uci_har_data, target_alpha = 0.15, save_dir = table_dir)
 # create_uci_har_table(uci_har_data, target_alpha = 0.2,  save_dir = table_dir)
 
@@ -1102,7 +1107,6 @@ create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
 #-------------------------------------------------------------------------------
 #                           Odor Decoding Exp
 #-------------------------------------------------------------------------------
-
 create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
   
   # Map rat_id to names
@@ -1133,9 +1137,7 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
   dat <- dat %>%
     filter(!(score_type %in% c("vanilla_full", "vanilla_train") & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
-  
-  # Aggregation
-  
+
   # --- A. Set-Valued Metrics (Marginal Only) ---
   # spilt conformal
   set_metrics <- dat %>%
@@ -1160,8 +1162,11 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
     summary_ood_val(Rat_Full)
   
   # --- D. Merge & Format --- 
-  formatted <- set_metrics %>% 
-    rename_with(~ paste0("std_", .), -c(score_type,Rat_Full)) %>% 
+  base <- tibble(score_type = unique(dat$score_type))
+  rat_base <- tibble(Rat_Full = rat_names)
+  formatted <- base %>% 
+    cross_join(rat_base) %>% 
+    left_join(set_metrics %>% rename_with(~ paste0("std_", .), -c(score_type,Rat_Full)), by = c("Rat_Full", "score_type")) %>% 
     left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -c(score_type,Rat_Full)), by = c("Rat_Full", "score_type")) %>%
     left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -c(score_type,Rat_Full)), by = c("Rat_Full", "score_type")) %>%
     left_join(point_metrics, by = c("Rat_Full", "score_type")) %>%
@@ -1213,20 +1218,19 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
     )) 
   
   
-  
   # --- F. Construct and save to LaTeX---
-  # # Align: Rat | Method | Cov Size | Acc | OOD
+  # # Align: Rat | Method | Cov Size | Acc AP | OOD
+  # Align: Rat | Method | Cov Size | Acc AP | OOD
   std_header_cmd <- paste0(
-    "\\hline\n",
-    " & & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
-    "\\cline{3-6}\n",
-    "\\textbf{Rat} & \\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
+    "\\toprule\n",
+    " & & \\multicolumn{2}{@{}c@{}}{Set-Valued} & \\multicolumn{2}{@{}c@{}}{Point} & \\multicolumn{1}{@{}c@{}}{OOD} \\\\\n",
+    "Rat & Method & Coverage & Size & Accuracy & Average Precision & AUC \\\\\n",
+    "\\midrule\n"
   )
-   
+  
   export_latex_table(
     df         = formatted_standard,
-    align_str  =  "l|ll|cc|c|c|",
+    align_str  = "llccccc",
     header_cmd = std_header_cmd,
     save_dir   = save_dir,
     group_col  = "rat",
@@ -1234,122 +1238,122 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
   )
  
   
-  #   for Standard, Jackknife, and FCP groups
+  #   for Standard, Jackknife, and FCP groups 
   comp_header_cmd <- paste0(
-    "\\hline\n",
-    " & & \\multicolumn{2}{c|}{\\textbf{Standard}} & \\multicolumn{2}{c|}{\\textbf{Jackknife}} & \\multicolumn{2}{c|}{\\textbf{FCP}} \\\\\n",
-    "\\cline{3-8}\n",
-    "\\textbf{Rat} & \\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Coverage} & \\textbf{Size} \\\\\n",
-    "\\hline\n"
+    "\\toprule\n",
+    " & & \\multicolumn{2}{@{}c@{}}{Standard} & \\multicolumn{2}{@{}c@{}}{Jackknife} & \\multicolumn{2}{@{}c@{}}{FCP} \\\\\n",
+    "Rat & Method & Coverage & Size & Coverage & Size & Coverage & Size \\\\\n",
+    "\\midrule\n"
   )
-   
+  
   export_latex_table(
-    df          = formatted_set_compare,
-    align_str   =  "l|ll|cc|cc|cc|",
-    header_cmd  = comp_header_cmd,
-    save_dir    = save_dir,
+    df         = formatted_set_compare,
+    align_str  = "llcccccc",
+    header_cmd = comp_header_cmd,
+    save_dir   = save_dir,
     group_col  = "rat",
-    file_name   = paste0("odor_decoding_set_valued_comparison_alpha", target_alpha, ".tex")
-  ) 
-}
-
-
-create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
-  
-  # Define targets and mapping
-  target_rats <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
-  rat_names_map <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
-  
-  # Filter and Process Data
-  dat <- df %>% 
-    filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha),
-           abs(beta - target_beta) < 1e-6 | is.na(beta)) %>%
-    mutate(Rat_Full = rat_names_map[rat_id + 1]) %>%
-    filter(Rat_Full %in% target_rats)
-  
-  # Treat Point Acc as Coverage for Vanilla HDC
-  hdc_as_sets <- dat %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    mutate(exp = "set_valued", marginal = TRUE, set_cov = point_acc, set_size = 1.0)
-  
-  dat <- dat %>%
-    filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
-    bind_rows(hdc_as_sets)
-  
-  # Aggregate Means
-  summary_stats <- dat %>%
-    mutate(method = replace_na(method, 'split_conformal')) %>% 
-    group_by(Rat_Full, score_type, method) %>%
-    summarise(
-      Cov = mean(set_cov[exp == "set_valued" & marginal == TRUE], na.rm=TRUE),
-      Size = mean(set_size[exp == "set_valued" & marginal == TRUE], na.rm=TRUE),
-      AUC = mean(ood_auroc[exp == "ood" & marginal == TRUE], na.rm=TRUE),
-      .groups = "drop"
-    ) %>%
-    rename(refit_method = method ) %>% 
-    mutate( 
-      Method = case_when(
-        score_type == "vanilla_full"  ~ "HDC",
-        score_type == "inverse_quantile" ~ "Inv. quantile",
-        score_type == "penalized" ~ "Penalized",
-        score_type == "sim" ~ "Similarity",
-        score_type == "ratio" ~ "CHDC-ratio",
-        score_type == "discount" ~ "CHDC-discount",
-        TRUE ~ score_type
-      ),
-      across(c(Cov, Size, AUC), ~ ifelse(is.na(.), "-", sprintf("%.3f", .)))
-    ) %>%
-    filter(score_type != "vanilla_train") # Omit HDC (train)
-  
-  # Pivot wider so each rat has its own set of 3 columns
-  ## set comparsion
-  
-  wide_comp_df = summary_stats %>% 
-    select(Method, refit_method, Rat_Full, Cov, Size) %>%
-    pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size), names_glue = "{Rat_Full}_{.value}") %>%
-    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
-
-  ## original 
-  wide_std_df <- summary_stats %>%
-    filter(refit_method=='split_conformal') %>% 
-    select(Method, Rat_Full, Cov, Size, AUC) %>%
-    pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size, AUC), names_glue = "{Rat_Full}_{.value}") %>%
-    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
-  
-  # Reorder columns to group by Rat: [Method, Rat1_Cov, Rat1_Size, Rat1_AUC, Rat2_Cov...]
-  col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size", "_AUC"), paste0))))
-  wide_std_df <- wide_std_df[, col_order]
-  col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size"), paste0))))
-  wide_comp_df = wide_comp_df[, col_order]
-  # TODO ADD LATEX FORMAT for wide_comp_df
-  
-  # LaTeX Formatting original
-  align_str <- "ll|ccc|ccc|ccc|ccc|ccc|"
-  
-  # Custom Header Construction
-  header_cmd <- paste0(
-    "\\hline\n",
-    " & \\multicolumn{3}{c|}{\\textbf{Barat}} & \\multicolumn{3}{c|}{\\textbf{Buchanan}} & \\multicolumn{3}{c|}{\\textbf{Mitt}} & \\multicolumn{3}{c|}{\\textbf{Stella}} & \\multicolumn{3}{c|}{\\textbf{Superchris}} \\\\\n",
-    "\\cline{2-16}\n",
-    "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
+    file_name  = paste0("odor_decoding_set_valued_comparison_alpha", target_alpha, ".tex")
   )
   
-  ltx <- xtable(wide_std_df, align = align_str)
-  
-  print(ltx, 
-        file = if(!is.null(save_dir)) file.path(save_dir, "odor_decoding_summary_table.tex") else "",
-        floating = FALSE, 
-        include.rownames = FALSE, 
-        include.colnames = FALSE, 
-        sanitize.text.function = function(x) x,
-        add.to.row = list(pos = list(0), command = header_cmd),
-        hline.after = c(nrow(wide_std_df)),
-        comment = FALSE)
-  
-  
 }
 
+
+# create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
+#   
+#   # Define targets and mapping
+#   target_rats <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
+#   rat_names_map <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
+#   
+#   # Filter and Process Data
+#   dat <- df %>% 
+#     filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha),
+#            abs(beta - target_beta) < 1e-6 | is.na(beta)) %>%
+#     mutate(Rat_Full = rat_names_map[rat_id + 1]) %>%
+#     filter(Rat_Full %in% target_rats)
+#   
+#   # Treat Point Acc as Coverage for Vanilla HDC
+#   hdc_as_sets <- dat %>%
+#     filter(score_type == "vanilla_full", exp == "point_valued") %>%
+#     mutate(exp = "set_valued", marginal = TRUE, set_cov = point_acc, set_size = 1.0)
+#   
+#   dat <- dat %>%
+#     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
+#     bind_rows(hdc_as_sets)
+#   
+#   # Aggregate Means
+#   summary_stats <- dat %>%
+#     mutate(method = replace_na(method, 'split_conformal')) %>% 
+#     group_by(Rat_Full, score_type, method) %>%
+#     summarise(
+#       Cov = mean(set_cov[exp == "set_valued" & marginal == TRUE], na.rm=TRUE),
+#       Size = mean(set_size[exp == "set_valued" & marginal == TRUE], na.rm=TRUE), 
+#       AUC = mean(ood_auroc[exp == "ood" & marginal == TRUE], na.rm=TRUE),
+#       .groups = "drop"
+#     ) %>%
+#     rename(refit_method = method ) %>% 
+#     mutate( 
+#       Method = case_when(
+#         score_type == "vanilla_full"  ~ "HDC",
+#         score_type == "inverse_quantile" ~ "Inv. quantile",
+#         score_type == "penalized" ~ "Penalized",
+#         score_type == "sim" ~ "Similarity",
+#         score_type == "ratio" ~ "CHDC-ratio",
+#         score_type == "discount" ~ "CHDC-discount",
+#         TRUE ~ score_type
+#       ),
+#       across(c(Cov, Size, AUC), ~ ifelse(is.na(.), "-", sprintf("%.3f", .)))
+#     ) %>%
+#     filter(score_type != "vanilla_train") # Omit HDC (train)
+#   
+#   # Pivot wider so each rat has its own set of 3 columns
+#   ## set comparsion
+#   
+#   wide_comp_df = summary_stats %>% 
+#     select(Method, refit_method, Rat_Full, Cov, Size) %>%
+#     pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size), names_glue = "{Rat_Full}_{.value}") %>%
+#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
+# 
+#   ## original 
+#   wide_std_df <- summary_stats %>%
+#     filter(refit_method=='split_conformal') %>% 
+#     select(Method, Rat_Full, Cov, Size, AUC) %>%
+#     pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size, AUC), names_glue = "{Rat_Full}_{.value}") %>%
+#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
+#   
+#   # Reorder columns to group by Rat: [Method, Rat1_Cov, Rat1_Size, Rat1_AUC, Rat2_Cov...]
+#   col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size", "_AUC"), paste0))))
+#   wide_std_df <- wide_std_df[, col_order]
+#   col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size"), paste0))))
+#   wide_comp_df = wide_comp_df[, col_order]
+#   # TODO ADD LATEX FORMAT for wide_comp_df
+#   
+#   # LaTeX Formatting original
+#   align_str <- "ll|ccc|ccc|ccc|ccc|ccc|"
+#   
+#   # Custom Header Construction
+#   header_cmd <- paste0(
+#     "\\hline\n",
+#     " & \\multicolumn{3}{c|}{\\textbf{Barat}} & \\multicolumn{3}{c|}{\\textbf{Buchanan}} & \\multicolumn{3}{c|}{\\textbf{Mitt}} & \\multicolumn{3}{c|}{\\textbf{Stella}} & \\multicolumn{3}{c|}{\\textbf{Superchris}} \\\\\n",
+#     "\\cline{2-16}\n",
+#     "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
+#     "\\hline\n"
+#   )
+#   
+#   ltx <- xtable(wide_std_df, align = align_str)
+#   
+#   print(ltx, 
+#         file = if(!is.null(save_dir)) file.path(save_dir, "odor_decoding_summary_table.tex") else "",
+#         floating = FALSE, 
+#         include.rownames = FALSE, 
+#         include.colnames = FALSE, 
+#         sanitize.text.function = function(x) x,
+#         add.to.row = list(pos = list(0), command = header_cmd),
+#         hline.after = c(nrow(wide_std_df)),
+#         comment = FALSE)
+#   
+#   
+# }
+# 
 
 #------------------
 # Execution
@@ -1358,12 +1362,12 @@ create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = 
 setwd(RESULT_ROOT) 
 odor_data = load_exp_results(
   results_dir =  "./odor_decoding/", 
-  pattern = "rat.*_seed.*_alpha.*_beta.*\\.csv", )
+  pattern = "rat.*_seed.*_alpha.*_beta.*\\.csv")
 
 table_dir <- paste0(OUT_ROOT,'/odor_decoding')
 
 create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
-create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
+# create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 
 
 
