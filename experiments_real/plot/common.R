@@ -173,42 +173,87 @@ export_latex_table <- function(df, align_str, header_cmd,
 #-------------------------------------------------------------------------------
 # timing_seed*.csv rows: training, calibration (one-time), and per-repetition test
 # encoding / HDC inference / conformal overhead on the full test split.
-RUNTIME_METHODS <- c(split_marginal = "Set-valued marg.", split_conditional = "Set-valued cond.",
-                     point_valued = "Point-valued", jackknife_plus = "Jackknife+",
-                     full_conformal = "Full conformal")
+library(ggplot2)
+library(tidyr)
+library(dplyr)
 
-summary_runtime <- function(timing, target_alpha, score = "ratio") {
-  timing %>%
-    filter(abs(alpha - target_alpha) < 1e-6, score_type %in% c(score, "all")) %>%
+# RUNTIME_METHODS <- c(split_marginal = "Set-valued marg.", split_conditional = "Set-valued cond.",
+#                      point_valued = "Point-valued", jackknife_plus = "Jackknife+",
+#                      full_conformal = "Full conformal")
+# 
+
+# 
+# # n_test: test points per repetition, stated in the header (times are not rescaled)
+# create_runtime_table <- function(timing, target_alpha, score = "ratio") {
+#   sec <- function(x) ifelse(is.na(x), "-", sprintf("%.4f", x))
+#   tab <-   timing %>%
+#     filter(abs(alpha - target_alpha) < 1e-6, score_type %in% c(score, "all")) %>%
+#     group_by(method) %>%
+#     summarise(across(c(training, calibration, encoding, hdc, conformal), mean), .groups = "drop") %>%
+#     mutate(method = factor(method, levels = names(RUNTIME_METHODS))) %>%
+#     arrange(method) %>%
+#     mutate(method = RUNTIME_METHODS[as.character(method)]) %>%
+#     mutate(across(-method, sec),
+#            method = factor(method, levels = RUNTIME_METHODS))
+#   return(tab)
+# }
+# 
+# uci_har_timing = load_exp_results("./uci_har/", pattern = "^timing_seed.*_alpha.*\\.csv$")
+# timing = create_runtime_table(uci_har_timing, target_alpha = 0.1)
+
+plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
+  
+  lw <- 0.25 / (.pt * 0.75)
+  
+  stage_cols <- c(training    = "grey",
+                  calibration = "#FD6467",   # coral
+                  inference   = "lightgrey",
+                  conformal   = "#B40F20")   # deep red
+  
+  long <- uci_har_timing %>%
+    filter(abs(alpha - target_alpha) < 1e-6, score_type %in% c("ratio", "all")) %>%
+    mutate(inference = encoding + hdc, .keep = "unused") %>%
     group_by(method) %>%
-    summarise(across(c(training, calibration, encoding, hdc, conformal), mean), .groups = "drop") %>%
-    mutate(method = factor(method, levels = names(RUNTIME_METHODS))) %>%
-    arrange(method) %>%
-    mutate(method = RUNTIME_METHODS[as.character(method)])
-}
-
-header_runtime <- function(n_test) paste0(
-  "\\toprule\n",
-  " & & & \\multicolumn{3}{@{}c@{}}{Inference (", n_test, " test points)} \\\\\n",
-  "Method & Training (s) & Calibration (s) & Encoding (s) & HDC (s) & Conformal (s) \\\\\n",
-  "\\midrule\n"
-)
-
-# Last line of the table: the CPU the times were measured on
-hardware_line <- function(timing) sprintf(
-  "\\multicolumn{6}{@{}l@{}}{CPU: %s} \\\\\n",
-  paste(unique(timing$cpu), collapse = ", "))
-
-# n_test: test points per repetition, stated in the header (times are not rescaled)
-create_runtime_table <- function(timing, target_alpha, n_test, score = "ratio",
-                                 save_dir = NULL, file_name = NULL) {
-  sec <- function(x) ifelse(is.na(x), "-", sprintf("%.4f", x))
-  tab <- summary_runtime(timing, target_alpha, score) %>%
-    mutate(across(-method, sec))
-  tex <- paste(capture.output(export_latex_table(tab, "lccccc", header_runtime(n_test))), collapse = "\n")
-  tex <- sub("\\end{tabular}", paste0(hardware_line(timing), "\\end{tabular}"), tex, fixed = TRUE)
-  if (is.null(save_dir) || is.null(file_name)) return(cat(tex, "\n"))
-  dir.create(save_dir, recursive = TRUE, showWarnings = FALSE)
-  cat(tex, "\n", file = file.path(save_dir, file_name))
-  cat("Saved tabular to:", file.path(save_dir, file_name), "\n")
+    summarise(across(names(stage_cols), \(x) mean(x, na.rm = TRUE)), .groups = "drop") %>%
+    mutate(method = factor(RUNTIME_METHODS[method], levels = RUNTIME_METHODS)) %>%
+    pivot_longer(-method, names_to = "stage", values_to = "time") %>%
+    mutate(time  = replace_na(time, 0),
+           stage = factor(stage, levels = names(stage_cols)))
+  
+  conf_lab <- long %>%
+    group_by(method) %>%
+    summarise(top  = sum(time),
+              conf = time[stage == "conformal"]) %>%
+    mutate(label = ifelse(conf < 1,
+                          sprintf("%.1f ms", conf * 1000),
+                          sprintf("%.2f s", conf)))
+  
+  cpu_name <- unique(uci_har_timing$cpu)[1]
+  
+  p_time <- ggplot(long, aes(x = method, y = time, fill = stage)) +
+    geom_col(aes(linewidth = stage == "conformal",
+                 color     = stage == "conformal"),
+             width = 0.6, position = position_stack(reverse = TRUE)) +
+    scale_fill_manual(values = stage_cols,
+                      labels = c("Training", "Calibration", "Inference", "Conformal")) +
+    scale_linewidth_manual(values = c(`FALSE` = lw, `TRUE` = 4 * lw), guide = "none") +
+    scale_color_manual(values = c(`FALSE` = "grey30", `TRUE` = "#B40F20"), guide = "none") +
+    geom_text(data = conf_lab, aes(x = method, y = top, label = label),
+              inherit.aes = FALSE, vjust = -0.5, size = 2.2,
+              color = "#B40F20", family = "Arial") +
+    annotate("text", x = Inf, y = Inf, label = paste("CPU:", cpu_name),
+             hjust = 1.02, vjust = 1.5, size = 2, color = "grey30", family = "Arial") +
+    coord_cartesian(ylim = c(15, 30)) +
+    labs(x = NULL, y = "Time (s)", fill = NULL) +
+    theme_classic(base_size = 9, base_family = "Arial") +
+    theme(axis.line   = element_line(linewidth = lw),
+          axis.ticks  = element_line(linewidth = lw),
+          axis.text.x = element_text(angle = 30, hjust = 1),
+          legend.position = "top",
+          legend.key.size = unit(3, "mm"))
+  
+  ggsave(file.path(save_dir, "timing.pdf"), p_time,
+         width = 90, height = 80, units = "mm", device = cairo_pdf)
+  
+  p_time
 }

@@ -1254,106 +1254,8 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
     group_col  = "rat",
     file_name  = paste0("odor_decoding_set_valued_comparison_alpha", target_alpha, ".tex")
   )
-  
+  return(formatted)
 }
-
-
-# create_odor_summary_table <- function(df, target_alpha, target_beta, save_dir = NULL) {
-#   
-#   # Define targets and mapping
-#   target_rats <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
-#   rat_names_map <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
-#   
-#   # Filter and Process Data
-#   dat <- df %>% 
-#     filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha),
-#            abs(beta - target_beta) < 1e-6 | is.na(beta)) %>%
-#     mutate(Rat_Full = rat_names_map[rat_id + 1]) %>%
-#     filter(Rat_Full %in% target_rats)
-#   
-#   # Treat Point Acc as Coverage for Vanilla HDC
-#   hdc_as_sets <- dat %>%
-#     filter(score_type == "vanilla_full", exp == "point_valued") %>%
-#     mutate(exp = "set_valued", marginal = TRUE, set_cov = point_acc, set_size = 1.0)
-#   
-#   dat <- dat %>%
-#     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
-#     bind_rows(hdc_as_sets)
-#   
-#   # Aggregate Means
-#   summary_stats <- dat %>%
-#     mutate(method = replace_na(method, 'split_conformal')) %>% 
-#     group_by(Rat_Full, score_type, method) %>%
-#     summarise(
-#       Cov = mean(set_cov[exp == "set_valued" & marginal == TRUE], na.rm=TRUE),
-#       Size = mean(set_size[exp == "set_valued" & marginal == TRUE], na.rm=TRUE), 
-#       AUC = mean(ood_auroc[exp == "ood" & marginal == TRUE], na.rm=TRUE),
-#       .groups = "drop"
-#     ) %>%
-#     rename(refit_method = method ) %>% 
-#     mutate( 
-#       Method = case_when(
-#         score_type == "vanilla_full"  ~ "HDC",
-#         score_type == "inverse_quantile" ~ "Inv. quantile",
-#         score_type == "penalized" ~ "Penalized",
-#         score_type == "sim" ~ "Similarity",
-#         score_type == "ratio" ~ "CHDC-ratio",
-#         score_type == "discount" ~ "CHDC-discount",
-#         TRUE ~ score_type
-#       ),
-#       across(c(Cov, Size, AUC), ~ ifelse(is.na(.), "-", sprintf("%.3f", .)))
-#     ) %>%
-#     filter(score_type != "vanilla_train") # Omit HDC (train)
-#   
-#   # Pivot wider so each rat has its own set of 3 columns
-#   ## set comparsion
-#   
-#   wide_comp_df = summary_stats %>% 
-#     select(Method, refit_method, Rat_Full, Cov, Size) %>%
-#     pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size), names_glue = "{Rat_Full}_{.value}") %>%
-#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
-# 
-#   ## original 
-#   wide_std_df <- summary_stats %>%
-#     filter(refit_method=='split_conformal') %>% 
-#     select(Method, Rat_Full, Cov, Size, AUC) %>%
-#     pivot_wider(names_from = Rat_Full, values_from = c(Cov, Size, AUC), names_glue = "{Rat_Full}_{.value}") %>%
-#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
-#   
-#   # Reorder columns to group by Rat: [Method, Rat1_Cov, Rat1_Size, Rat1_AUC, Rat2_Cov...]
-#   col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size", "_AUC"), paste0))))
-#   wide_std_df <- wide_std_df[, col_order]
-#   col_order <- c("Method", as.vector(t(outer(target_rats, c("_Cov", "_Size"), paste0))))
-#   wide_comp_df = wide_comp_df[, col_order]
-#   # TODO ADD LATEX FORMAT for wide_comp_df
-#   
-#   # LaTeX Formatting original
-#   align_str <- "ll|ccc|ccc|ccc|ccc|ccc|"
-#   
-#   # Custom Header Construction
-#   header_cmd <- paste0(
-#     "\\hline\n",
-#     " & \\multicolumn{3}{c|}{\\textbf{Barat}} & \\multicolumn{3}{c|}{\\textbf{Buchanan}} & \\multicolumn{3}{c|}{\\textbf{Mitt}} & \\multicolumn{3}{c|}{\\textbf{Stella}} & \\multicolumn{3}{c|}{\\textbf{Superchris}} \\\\\n",
-#     "\\cline{2-16}\n",
-#     "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
-#     "\\hline\n"
-#   )
-#   
-#   ltx <- xtable(wide_std_df, align = align_str)
-#   
-#   print(ltx, 
-#         file = if(!is.null(save_dir)) file.path(save_dir, "odor_decoding_summary_table.tex") else "",
-#         floating = FALSE, 
-#         include.rownames = FALSE, 
-#         include.colnames = FALSE, 
-#         sanitize.text.function = function(x) x,
-#         add.to.row = list(pos = list(0), command = header_cmd),
-#         hline.after = c(nrow(wide_std_df)),
-#         comment = FALSE)
-#   
-#   
-# }
-# 
 
 #------------------
 # Execution
@@ -1366,11 +1268,86 @@ odor_data = load_exp_results(
 
 table_dir <- paste0(OUT_ROOT,'/odor_decoding')
 
-create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
+odor_table = create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 # create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 
 
 
+# ---- Plot odor ----
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+get_mean <- function(x) suppressWarnings(as.numeric(sub(" .*", "", trimws(x)))) 
+nrats = unique(odor_table$rat) %>% length()
+
+my_cols <- c(
+  "CHDC-ratio"    = "#972D15", 
+  "CHDC-discount" = "#F4B5BD",   
+  "HDC (train)"   = "#B5B2AE",   
+  "HDC"           = "#8D8680",   
+  "Inv. quantile" = "#6B7480",  
+  "Penalized"     = "#7E8A84",   
+  "Similarity"    = "#A3A1AD" )  
+
+
+lw <- 0.25 / (.pt * 0.75)   # 0.25 pt 
+dat = odor_table %>%
+  ungroup() %>%
+  mutate(method      = factor(Method, levels = unique(Method)),
+         coverage    = get_mean(Cov_std),  
+         size        = get_mean(Size_std),
+         ap          = get_mean(AveragePrecision),
+         auc         = get_mean(AUROC)) %>% 
+  filter(method != "HDC (train)")  %>% 
+  select(method, rat, coverage, size, auc, ap)
+
+
+# ---- 1. Average precision ----
+p1 = ggplot(dat, aes(x = method, y = ap, fill = method)) +
+  geom_boxplot(
+    width = 0.3, outlier.shape = NA, linewidth = lw,
+    alpha = 0.25, color = 'darkgrey') +
+  geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
+  labs(y = "Average precision", x = 'Methods') +
+  scale_color_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols) + theme_classic() +theme(legend.position = 'none')
+
+
+# ---- 2. Coverage vs. set size (target coverage = 1 - alpha = 0.8) ----
+p2 = ggplot(dat, aes(x = method, y = coverage, fill = method)) +
+  geom_boxplot(
+    linewidth = lw, width = 0.3, outlier.shape = NA, alpha = 0.25, color = 'darkgrey') +
+  geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
+  labs(y = "Coverage", x = 'Methods') +
+  geom_hline(yintercept = 0.8, linetype = "dashed") +
+  ylim(0.75,0.85)+
+  scale_color_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols)+theme_classic()+theme(legend.position = 'none')
+
+
+p3 = ggplot(dat, aes(x = method, y = size, fill = method)) +
+  geom_boxplot(linewidth = lw,width = 0.3, outlier.shape = NA, alpha = 0.25, color = 'darkgrey') +
+  geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
+  labs(y = "Set size", x = 'Methods') + 
+  scale_color_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols)+  theme_classic()+theme(legend.position = 'none')
+
+# ---- 3. OOD detection AUC (0.5 = chance) ---- 
+p4 = ggplot(dat, aes(x = method, y = auc, fill = method)) +
+  geom_boxplot(linewidth = lw,width = 0.3, outlier.shape = NA, alpha = 0.3, color = 'darkgrey') +
+  geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) + 
+  labs(y = "OOD AUC", x = 'Methods') + 
+  scale_color_manual(values = my_cols) +
+  scale_fill_manual(values = my_cols)+ theme_classic()
+
+ 
+plots <- list(ap = p1, coverage = p2, size = p3, auc = p4)
+
+for (nm in names(plots)) {
+  ggsave(
+    paste0("/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/odor_decoding/",nm, ".pdf"),
+    plots[[nm]], device = pdf , useDingbats = FALSE)
+}
 #-------------------------------------------------------------------------------
 #                    Combined Summary Table (with Odor Exp)
 #-------------------------------------------------------------------------------
