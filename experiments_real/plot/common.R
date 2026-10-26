@@ -169,41 +169,21 @@ export_latex_table <- function(df, align_str, header_cmd,
 } 
 
 #-------------------------------------------------------------------------------
-#                           Runtime table
+#                           plot
 #-------------------------------------------------------------------------------
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra) 
+# RUNTIME table -------------------------------
+lw <- 0.25 / (.pt * 0.75)
+RUNTIME_METHODS <- c(split_marginal = "Set-valued marg.", split_conditional = "Set-valued cond.",
+                     point_valued = "Point-valued", jackknife_plus = "Jackknife+",
+                     full_conformal = "Full conformal")
 # timing_seed*.csv rows: training, calibration (one-time), and per-repetition test
 # encoding / HDC inference / conformal overhead on the full test split.
-library(ggplot2)
-library(tidyr)
-library(dplyr)
-
-# RUNTIME_METHODS <- c(split_marginal = "Set-valued marg.", split_conditional = "Set-valued cond.",
-#                      point_valued = "Point-valued", jackknife_plus = "Jackknife+",
-#                      full_conformal = "Full conformal")
-# 
-
-# 
-# # n_test: test points per repetition, stated in the header (times are not rescaled)
-# create_runtime_table <- function(timing, target_alpha, score = "ratio") {
-#   sec <- function(x) ifelse(is.na(x), "-", sprintf("%.4f", x))
-#   tab <-   timing %>%
-#     filter(abs(alpha - target_alpha) < 1e-6, score_type %in% c(score, "all")) %>%
-#     group_by(method) %>%
-#     summarise(across(c(training, calibration, encoding, hdc, conformal), mean), .groups = "drop") %>%
-#     mutate(method = factor(method, levels = names(RUNTIME_METHODS))) %>%
-#     arrange(method) %>%
-#     mutate(method = RUNTIME_METHODS[as.character(method)]) %>%
-#     mutate(across(-method, sec),
-#            method = factor(method, levels = RUNTIME_METHODS))
-#   return(tab)
-# }
-# 
-# uci_har_timing = load_exp_results("./uci_har/", pattern = "^timing_seed.*_alpha.*\\.csv$")
-# timing = create_runtime_table(uci_har_timing, target_alpha = 0.1)
-
 plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
-  
-  lw <- 0.25 / (.pt * 0.75)
   
   stage_cols <- c(training    = "grey",
                   calibration = "#FD6467",   # coral
@@ -256,4 +236,191 @@ plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
          width = 90, height = 80, units = "mm", device = cairo_pdf)
   
   p_time
+}
+
+
+# EXP performance-----------------------------------------
+
+get_mean <- function(x) suppressWarnings(as.numeric(sub(" .*", "", trimws(x)))) 
+get_se <- function(x) suppressWarnings(as.numeric(sub(".*\\((.*)\\).*", "\\1", trimws(x))))
+
+score_colors <- c(
+  "CHDC-ratio"    = "#972D15", 
+  "CHDC-discount" = "#F4B5BD",   
+  "HDC (train)"   = "#B5B2AE",   
+  "HDC"           = "#8D8680",   
+  "Inv. quantile" = "#6B7480",  
+  "Penalized"     = "#7E8A84",   
+  "Similarity"    = "#A3A1AD" )  
+
+
+plot_exp_results <- function(results, target_alpha, delta_ylim = c(-0.01,0.01), save_path=NULL) {
+  
+  # ---- Data: split "mean (se)" cells into numeric columns ----
+  dat <- results %>%
+    ungroup() %>%
+    mutate(method       = factor(Method, levels = unique(Method)),
+           coverage     = get_mean(Cov_std),          coverage_se     = get_se(Cov_std),
+           size         = get_mean(Size_std),         size_se         = get_se(Size_std),
+           coverage_jk  = get_mean(Cov_jk),           coverage_jk_se  = get_se(Cov_jk),
+           size_jk      = get_mean(Size_jk),          size_jk_se      = get_se(Size_jk),
+           coverage_fcp = get_mean(Cov_fcp),          coverage_fcp_se = get_se(Cov_fcp),
+           size_fcp     = get_mean(Size_fcp),         size_fcp_se     = get_se(Size_fcp),
+           ap           = get_mean(AveragePrecision), ap_se           = get_se(AveragePrecision),
+           auc          = get_mean(AUROC),            auc_se          = get_se(AUROC)) %>%
+    filter(method != "HDC (train)")
+  
+  # ---- Shared bar plot: one bar per score, +/- se error bar ----
+  bar_plot <- function(y, ylab, legend = FALSE) {
+    se <- paste0(y, "_se")
+    ggplot(dat, aes(x = method, y = .data[[y]], fill = method)) +
+      geom_col(width = 0.5, alpha = 0.5) +
+      geom_errorbar(aes(ymin = .data[[y]] - .data[[se]],
+                        ymax = .data[[y]] + .data[[se]]), width = 0.05) +
+      labs(y = ylab, x = "Methods") +
+      scale_fill_manual(values = score_colors) +
+      theme_classic() +
+      theme(legend.position = if (legend) "right" else "none")
+  } 
+  p1 <- bar_plot("ap", "Average precision") +                    # 1. average precision
+    coord_cartesian(ylim = c(0, 1))
+  p2 <- bar_plot("coverage", "Coverage") +# 2. coverage (target 0.95)
+    geom_hline(yintercept = 1-target_alpha, linetype = "dashed",alpha = 0.6) +
+    coord_cartesian(ylim = c(1-target_alpha - 0.025, min(1 - target_alpha +0.025,1)))
+  p3 <- bar_plot("size", "Set size")                             #    set size
+  p4 <- bar_plot("auc", "OOD AUC", legend = TRUE)                # 3. OOD detection AUC
+  
+  # ---- 4. Retraining: difference of JK+ / full conformal from standard ----
+  diff_long <- dat %>%
+    select(method,
+           coverage_std_mean = coverage,     coverage_std_se = coverage_se,
+           coverage_jk_mean  = coverage_jk,  coverage_jk_se  = coverage_jk_se,
+           coverage_fcp_mean = coverage_fcp, coverage_fcp_se = coverage_fcp_se,
+           size_std_mean     = size,         size_std_se     = size_se,
+           size_jk_mean      = size_jk,      size_jk_se      = size_jk_se,
+           size_fcp_mean     = size_fcp,     size_fcp_se     = size_fcp_se) %>%
+    pivot_longer(-method,
+                 names_to      = c("metric", "variant", ".value"),
+                 names_pattern = "(coverage|size)_(std|jk|fcp)_(mean|se)") %>%
+    filter(!is.na(mean)) %>%
+    mutate(variant = factor(variant, levels = c("std", "jk", "fcp"),
+                            labels = c("Standard", "Jackknife+", "Full conformal")),
+           metric  = factor(metric, levels = c("coverage", "size"),
+                            labels = c("Coverage", "Set size"))) %>%
+    group_by(metric, method) %>%
+    mutate(diff = mean - mean[variant == "Standard"]) %>%
+    ungroup() %>%
+    filter(variant != "Standard")
+  
+  dodge <- position_dodge(width = 0.7)
+  
+  diff_plot <- function(m, ylab,ylim, legend = FALSE) {
+    ggplot(filter(diff_long, metric == m),
+           aes(x = method, y = diff, fill = method, alpha = variant)) +
+      geom_hline(yintercept = 0, color = "grey40") +
+      geom_col(position = dodge, width = 0.6) +
+      geom_point(aes(color = method, shape = variant, group = variant),
+                 position = dodge, size = 1.5, alpha = 1) +
+      scale_color_manual(values = score_colors, guide = "none") +
+      scale_fill_manual(values = score_colors, guide = "none") +
+      scale_shape_manual(values = c(`Jackknife+` = 17, `Full conformal` = 16)) +
+      scale_alpha_manual(values = c(`Jackknife+` = 0.3, `Full conformal` = 0.7)) +
+      labs(x = "Scores", y = ylab, alpha = "Variant", shape = "Variant") +
+      coord_cartesian(ylim =ylim) +
+      theme_classic() +
+      theme(legend.position      = if (legend) c(0.98, 0.98) else "none",
+            legend.justification = c(1, 1),
+            legend.key.size      = unit(3, "mm"),
+            legend.background    = element_blank())
+  }
+  
+  p_dcov  <- diff_plot("Coverage", "Δ Coverage", ylim = c(-0.01,0.01),legend = TRUE)
+  p_dsize <- diff_plot("Set size", "Δ Set size",ylim = delta_ylim)
+  # ---- Full figure: 7 pt Arial, 180 mm wide ----
+  #   col 1: coverage, set size | col 2: AP, OOD AUC | col 3: retraining differences
+  fig_theme <- theme(text        = element_text(family = "Arial", size = 7),
+                     axis.text   = element_text(size = 7),
+                     axis.text.x = element_text(angle = 30, hjust = 1),
+                     strip.text  = element_text(size = 7),
+                     legend.text = element_text(size = 7),
+                     plot.title  = element_text(size = 9, face = "bold.italic"))
+  f <- function(p) p + fig_theme
+  
+  no_x <- theme(axis.text.x  = element_blank(),
+                axis.ticks.x = element_blank(),
+                axis.title.x = element_blank())
+  
+  stack2 <- function(top, bottom) {
+    rbind(ggplotGrob(f(top) + no_x), ggplotGrob(f(bottom)), size = "first")
+  }
+  
+  blank <- ggtitle(" ")   # same height as a real title, keeps rows aligned
+  
+  fig <- arrangeGrob(
+    stack2(p2 + ggtitle("Set-valued prediction"), p3 + blank),
+    stack2(p1 + ggtitle("Point-valued prediction"),
+           p4 + ggtitle("OOD detection") + theme(legend.position = "none")),
+    stack2(p_dcov + ggtitle("Retrain variants"), p_dsize + blank),
+    ncol = 3
+  )
+  ggsave(save_path, fig, width = 180, height = 120, units = "mm", device = cairo_pdf)
+}
+
+
+# Neural decoding -------------------
+plot_odor_results = function(odor_table){
+  
+  nrats = unique(odor_table$rat) %>% length() 
+  dat = odor_table %>%
+    ungroup() %>%
+    mutate(method      = factor(Method, levels = unique(Method)),
+           coverage    = get_mean(Cov_std),  
+           size        = get_mean(Size_std),
+           ap          = get_mean(AveragePrecision),
+           auc         = get_mean(AUROC)) %>% 
+    filter(method != "HDC (train)")  %>% 
+    select(method, rat, coverage, size, auc, ap)
+  
+  
+  # ---- 1. Average precision ----
+  p1 = ggplot(dat, aes(x = method, y = ap, fill = method)) +
+    geom_boxplot(
+      width = 0.3, outlier.shape = NA, linewidth = lw,
+      alpha = 0.25, color = 'darkgrey') +
+    geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
+    labs(y = "Average precision", x = 'Methods') +
+    scale_color_manual(values = score_colors) +
+    scale_fill_manual(values = score_colors) + theme_classic() +theme(legend.position = 'none')
+  
+  
+  # ---- 2. Coverage vs. set size (target coverage = 1 - alpha = 0.8) ----
+  p2 = ggplot(dat, aes(x = method, y = coverage, fill = method)) +
+    geom_boxplot(
+      linewidth = lw, width = 0.3, outlier.shape = NA, alpha = 0.25, color = 'darkgrey') +
+    geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
+    labs(y = "Coverage", x = 'Methods') +
+    geom_hline(yintercept = 0.8, linetype = "dashed") +
+    ylim(0.75,0.85)+
+    scale_color_manual(values = score_colors) +
+    scale_fill_manual(values = score_colors)+theme_classic()+theme(legend.position = 'none')
+  
+  
+  p3 = ggplot(dat, aes(x = method, y = size, fill = method)) +
+    geom_boxplot(linewidth = lw,width = 0.3, outlier.shape = NA, alpha = 0.25, color = 'darkgrey') +
+    geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
+    labs(y = "Set size", x = 'Methods') + 
+    scale_color_manual(values = score_colors) +
+    scale_fill_manual(values = score_colors)+  theme_classic()+theme(legend.position = 'none')
+  
+  # ---- 3. OOD detection AUC (0.5 = chance) ---- 
+  p4 = ggplot(dat, aes(x = method, y = auc, fill = method)) +
+    geom_boxplot(linewidth = lw,width = 0.3, outlier.shape = NA, alpha = 0.3, color = 'darkgrey') +
+    geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) + 
+    labs(y = "OOD AUC", x = 'Methods') + 
+    scale_color_manual(values = score_colors) +
+    scale_fill_manual(values = score_colors)+ theme_classic()
+  
+  
+  plots <- list(ap = p1, coverage = p2, size = p3, auc = p4)
+  return(plots)
 }
