@@ -15,148 +15,6 @@ RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real_efficiency/results"
 OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table'
 
 
-# #-------------------------------------------------------------------------------
-# #                           Isolet Exp
-# #-------------------------------------------------------------------------------
-# 
-# create_isolet_table <- function(df, target_alpha, save_dir = NULL) {
-#   
-#   # 1. Filter Data by Alpha (keep NA alphas for Vanilla baselines if needed)
-#   dat <- df %>%  
-#     filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
-#     filter(score_type != "vanilla_train")
-#   
-#   if (nrow(dat) == 0) {
-#     warning(paste("No data found for alpha =", target_alpha))
-#     return(NULL)
-#   }
-#   
-#   #-----------------------
-#   #  HDC Singleton Logic
-#   #-----------------------
-#   # Treat HDC (vanilla_full) as producing a singleton set:
-#   #   - Set Coverage = Point Accuracy
-#   #   - Set Size     = 1.0
-#   
-#   hdc_as_sets <-summary_vanilla_hdc(dat)
-#   
-#   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
-#   dat <- dat %>%
-#     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
-#     bind_rows(hdc_as_sets)
-#   
-#   #------------------------------------------------
-#   # Aggregation (Grouped by Score Type)
-#   #------------------------------------------------
-#   
-#   # --- A. Set-Valued Metrics (Marginal Only) ---
-#   # spilt conformal
-#   set_metrics <- dat %>% 
-#     filter(method == "split_conformal") %>% 
-#     summary_set_val()
-#   
-#   # jk
-#   set_metrics_jk <- dat %>%
-#     filter(method == "jackknife_plus") %>% 
-#     summary_set_val()
-#   
-#   # fcp
-#   set_metrics_fcp <- dat %>% 
-#     filter(method == "full_conformal") %>% 
-#     summary_set_val()
-#   
-#   # --- B. Point-Valued Metrics ---
-#   point_metrics <- dat %>%
-#     summary_point_val()
-# 
-#   
-#   # --- C. OOD Metrics ---
-#   ood_metrics <- dat %>%
-#     summary_ood_val()
-# 
-#   
-#   # --- D. Merge & Format ---
-#   base <- tibble(score_type = unique(dat$score_type))
-#   
-#   joined <- base %>%
-#     left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
-#     left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
-#     left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
-#     left_join(point_metrics, by = "score_type") %>%
-#     left_join(ood_metrics,   by = "score_type")
-# 
-#   formatted <- joined %>%
-#     transmute(
-#       score_type = score_type,
-#       Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
-#       Size_std = fmt(std_m_siz_u, std_m_siz_se),
-#       Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
-#       Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
-#       Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
-#       Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
-#       Accuracy      = fmt(acc_u,     acc_se),
-#       AveragePrecision = fmt(ap_u, ap_se),
-#       AUROC      = fmt(ood_u,     ood_se)
-#     )
-#   # --- E. Rename & Reorder (Strict 3-Class Convention) ---
-#   formatted <- formatted %>%
-#     mutate(Method = case_when(
-#       score_type == "vanilla_full" ~ "HDC",
-#       score_type == "inverse_quantile" ~ "Inv. quantile",
-#       score_type == "penalized" ~ "Penalized",
-#       score_type == "sim" ~ "Similarity",
-#       score_type == "ratio" ~ "CHDC-ratio",
-#       score_type == "discount" ~ "CHDC-discount",
-#       TRUE ~ score_type
-#     )) %>%
-#     filter(Method != "vanilla_train") %>%
-#     # Use exact same order as 3-class
-#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
-#                                       "Similarity", "CHDC-ratio", "CHDC-discount"))) 
-#   formatted_standard = formatted%>%
-#     select(Method, Cov_std, Size_std, Accuracy, AveragePrecision, AUROC)
-#   formatted_set_compare = formatted%>%
-#     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
-#   
-#   
-#   # --- F. Construct and save to LaTeX---
-#   # Structure: Method | Cov Size | Acc | OOD |
-# 
-#   export_latex_table(
-#     df = formatted_standard,
-#     align_str ="|l|cc|cc|c|" ,
-#     header_cmd = header_standard,
-#     save_dir = save_dir,
-#     file_name = if (exists("target_alpha")) paste0("isolet_table_alpha", target_alpha, ".tex") else "isolet_table.tex"
-#   )
-#  
-#   # Structure: Method | Cov Size | Cov Size | Cov Size
-#   export_latex_table(
-#     df = formatted_set_compare,
-#     align_str = "|l|cc|cc|cc|",
-#     header_cmd = header_set_compare,
-#     save_dir = save_dir,
-#     file_name = if (exists("target_alpha")) paste0("isolet_set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
-#   )
-#   return(formatted)
-# }
-# 
-# #------------------
-# # Save Table 
-# #------------------
-# # Set your results directory here
-# setwd(RESULT_ROOT) 
-# isolet_data = load_exp_results(results_dir = "./isolet/" )
-# 
-# table_dir <- paste0(OUT_ROOT, "/isolet")
-# 
-# create_isolet_table(isolet_data, target_alpha = 0.05, save_dir = table_dir)
-# create_isolet_table(isolet_data, target_alpha = 0.02, save_dir = table_dir)
-# #create_isolet_table(isolet_data, target_alpha = 0.01, save_dir = table_dir)
-# 
-
-
-
 #-------------------------------------------------------------------------------
 #                           MNIST Exp
 #-------------------------------------------------------------------------------
@@ -434,156 +292,6 @@ table_dir <- paste0(OUT_ROOT,'/fashion_mnist')
 fminst_results = create_fmnist_table(fmnist_data, target_alpha = 0.05, save_dir = table_dir)
 # create_fmnist_table(fmnist_data, target_alpha = 0.1,  save_dir = table_dir)
 plots <- plot_exp_results(fminst_results, target_alpha = 0.05,save_path =  paste0(table_dir,"/fmnist_full.pdf"))
-
-
-#-------------------------------------------------------------------------------
-#                         Languages Exp
-#-------------------------------------------------------------------------------
-
-create_languages_table <- function(df, target_alpha, save_dir = NULL) {
-  
-  # Filter Data by Alpha
-  dat <- df %>% 
-    filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha)) %>%
-    filter(score_type != "vanilla_train")
-  
-  if (nrow(dat) == 0) {
-    warning(paste("No data found for alpha =", target_alpha))
-    return(NULL)
-  }
-  
-  #-----------------------
-  #   HDC Singleton Logic
-  #-----------------------
-  # Treat HDC (vanilla_full) as producing a singleton set:
-  #   - Set Coverage = Point Accuracy
-  #   - Set Size     = 1.0
-  hdc_as_sets <- summary_vanilla_hdc(dat)
-  
-  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
-  dat <- dat %>%
-    filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
-    bind_rows(hdc_as_sets)
-  
-  #------------------------------------------------
-  # Aggregation (Grouped by Score Type)
-  #------------------------------------------------
-  
-  # --- A. Set-Valued Metrics (Marginal Only) ---
-  # spilt conformal
-  set_metrics <- dat %>%
-    filter(method == "split_conformal") %>%
-    summary_set_val()
-  
-  # jk
-  set_metrics_jk <- dat %>%
-    filter(method == "jackknife_plus") %>%
-    summary_set_val()
-  
-  # fcp
-  set_metrics_fcp <- dat %>%
-    filter(method == "full_conformal") %>%
-    summary_set_val()
-  
-  # --- B. Point-Valued Metrics ---
-  point_metrics <- dat %>%
-    summary_point_val()
-  
-  
-  # --- C. OOD Metrics ---
-  ood_metrics <- dat %>%
-    summary_ood_val()
-  
-  # --- D. Merge & Format ---
-  base <- tibble(score_type = unique(dat$score_type))
-  
-  joined <- base %>%
-    left_join(set_metrics     %>% rename_with(~ paste0("std_", .), -score_type), by = "score_type") %>%
-    left_join(set_metrics_jk  %>% rename_with(~ paste0("jk_", .),  -score_type), by = "score_type") %>%
-    left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
-    left_join(point_metrics, by = "score_type") %>%
-    left_join(ood_metrics,   by = "score_type")
-  
-  formatted <- joined %>%
-    transmute(
-      score_type = score_type,
-      Cov_std  = fmt(std_m_cov_u, std_m_cov_se),
-      Size_std = fmt(std_m_siz_u, std_m_siz_se),
-      Cov_jk   = fmt(jk_m_cov_u, jk_m_cov_se),
-      Size_jk  = fmt(jk_m_siz_u, jk_m_siz_se),
-      Cov_fcp  = fmt(fcp_m_cov_u,   fcp_m_cov_se),
-      Size_fcp = fmt(fcp_m_siz_u,   fcp_m_siz_se),
-      Accuracy      = fmt(acc_u,     acc_se),
-      AveragePrecision  = fmt(ap_u,     ap_se),
-      AUROC      = fmt(ood_u,     ood_se)
-    )
-  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
-  formatted <- formatted %>%
-    mutate(Method = case_when(
-      score_type == "vanilla_full" ~ "HDC",
-      score_type == "inverse_quantile" ~ "Inv. quantile",
-      score_type == "penalized" ~ "Penalized",
-      score_type == "sim" ~ "Similarity",
-      score_type == "ratio" ~ "CHDC-ratio",
-      score_type == "discount" ~ "CHDC-discount",
-      TRUE ~ score_type
-    )) %>%
-    filter(Method != "vanilla_train") %>%
-    # Use exact same order as 3-class
-    arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
-                                      "Similarity", "CHDC-ratio", "CHDC-discount")))
-  formatted_standard = formatted%>%
-    select(Method, Cov_std, Size_std, Accuracy, AveragePrecision, AUROC)
-  formatted_set_compare = formatted%>%
-    select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
-  
-  # --- F. Construct LaTeX Header ---
-  # Structure: Method | Cov Size | Acc | OOD |
-  align_str <- "l|l|cc|c|c|"
-  
-  additor <- list()
-  additor$pos <- list(0)
-  additor$command <- paste0(
-    "\\hline\n",
-    " & \\multicolumn{2}{c|}{\\textbf{Set-Valued}} & \\multicolumn{1}{c|}{\\textbf{Point}} & \\multicolumn{1}{c|}{\\textbf{OOD}} \\\\\n",
-    "\\cline{2-5}\n",
-    "\\textbf{Method} & \\textbf{Coverage} & \\textbf{Size} & \\textbf{Accuracy} & \\textbf{AUC} \\\\\n",
-    "\\hline\n"
-  )
-  
-  # --- F. Construct and save to LaTeX---
-  # Structure: Method | Cov Size | Acc | OOD |
-  
-  export_latex_table(
-    df = formatted_standard,
-    align_str = "|l|cc|cc|c|",
-    header_cmd = header_standard,
-    save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("language_table_alpha", target_alpha, ".tex") else "table.tex"
-  )
-  
-  # Structure: Method | Cov Size | Cov Size | Cov Size
-  export_latex_table(
-    df = formatted_set_compare,
-    align_str = "|l|cc|cc|cc|",
-    header_cmd = header_set_compare,
-    save_dir = save_dir,
-    file_name = if (exists("target_alpha")) paste0("language_set_compare_table_alpha", target_alpha, ".tex") else "set_compare_table.tex"
-  )
-  return(formatted)
-}
-
-#------------------
-# Save Table 
-#------------------
-# Set your results directory here
-setwd(RESULT_ROOT) 
-languages_data = load_exp_results("./languages/" )
-
-table_dir <- paste0(OUT_ROOT,'/languages')
-lan_results = create_languages_table(languages_data, target_alpha = 0.01, save_dir = table_dir)
-
-plots <- plot_exp_results(lan_results, target_alpha = 0.01,delta_ylim = c(-0.1,0.1),save_path =  paste0(table_dir,"/languages_full.pdf"))
 
 
 #-------------------------------------------------------------------------------
@@ -870,6 +578,18 @@ plot_runtime(uci_har_timing, target_alpha = 0.1, save_dir = table_dir)
 make_dataset_table <- function(results_list, alphas, file = NULL) {
   fmt <- function(x) ifelse(is.na(x), "-", sprintf("%.3f", x))
   
+  # Bold the best value in a row: rule is "max", "min" or "none"; skip = excluded methods
+  fmt_row <- function(x, rule, skip) {
+    out  <- fmt(x)
+    cand <- round(x, 3)                 # compare at printed precision, so ties bold together
+    cand[skip] <- NA
+    if (rule == "none" || all(is.na(cand))) return(out)
+    best <- if (rule == "max") max(cand, na.rm = TRUE) else min(cand, na.rm = TRUE)
+    hit  <- !is.na(cand) & cand == best
+    out[hit] <- sprintf("\\textbf{%s}", out[hit])
+    out
+  }
+  
   blocks <- lapply(results_list, function(res) res %>%
                      ungroup() %>%
                      filter(Method != "HDC (train)") %>%
@@ -877,14 +597,18 @@ make_dataset_table <- function(results_list, alphas, file = NULL) {
                                cov  = ifelse(Method == "HDC", get_mean(Accuracy), get_mean(Cov_std)),
                                size = ifelse(Method == "HDC", 1, get_mean(Size_std)),
                                ap   = get_mean(AveragePrecision),
-                               auc  = get_mean(AUROC)) %>%
-                     mutate(across(-Method, fmt)))
+                               auc  = get_mean(AUROC)))
   
   methods <- blocks[[1]]$Method
   metrics <- c("Cov.", "Size", "AP", "AUC")
+  rules   <- c("none", "min", "max", "max")          # same order as metrics
+  is_hdc  <- methods == "HDC"
+  
   body <- lapply(names(blocks), function(d) {
     b     <- blocks[[d]]
-    cells <- t(as.matrix(b[match(methods, b$Method), -1]))
+    nums  <- t(as.matrix(b[match(methods, b$Method), -1]))   # rows = metrics, cols = methods
+    cells <- t(sapply(seq_along(metrics), function(k)
+      fmt_row(nums[k, ], rules[k], skip = if (k == 2) is_hdc else FALSE)))
     first <- c(sprintf("\\textbf{%s}", d),
                sprintf("($\\alpha = %s$)", alphas[d]), "", "")
     paste0(first, " & ", metrics, " & ", apply(cells, 1, paste, collapse = " & "), " \\\\")
@@ -907,12 +631,11 @@ make_dataset_table <- function(results_list, alphas, file = NULL) {
 }
 combined_path <- '/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/benchmark_dataset_summary.tex'
 results_list <- list(MNIST           = mnist_results,
-                     `Fashion-MNIST` = fminst_results,
-                     Languages       = lan_results,
+                     `Fashion-MNIST` = fminst_results, 
                      PAMAP2          = pamap2_results,
                      `UCI HAR`       = ucihar_results)
 
-alphas <- c(MNIST = 0.05, `Fashion-MNIST` = 0.05, Languages = 0.01,
+alphas <- c(MNIST = 0.05, `Fashion-MNIST` = 0.05,  
             PAMAP2 = 0.1, `UCI HAR` = 0.1)    
 
 make_dataset_table(results_list, alphas, file = combined_path)
@@ -1084,130 +807,7 @@ table_dir <- paste0(OUT_ROOT,'/odor_decoding')
 
 odor_table = create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 # create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
-plots = plot_odor_results(odor_table)
-# ---- Plot odor ---
-for (nm in names(plots)) {
-  ggsave(
-    paste0("/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/odor_decoding/",nm, ".pdf"),
-    plots[[nm]], device = pdf , useDingbats = FALSE)
-}
-# #-------------------------------------------------------------------------------
-# #                    Combined Summary Table (with Odor Exp)
-# #-------------------------------------------------------------------------------
-# create_combined_table <- function(iso_df, mnist_df, lang_df, odor_df,
-#                                            iso_alpha, mnist_alpha, lang_alpha, 
-#                                            rat_name, rat_alpha, rat_beta,
-#                                            save_path = NULL) {
-#   
-#   # Internal helper to aggregate metrics (reused from your existing logic)
-#   get_summary <- function(df, target_alpha, target_beta = NULL) {
-#     # Filter for alpha and beta (if beta is provided)
-#     dat <- df %>% 
-#       filter(abs(alpha - target_alpha) < 1e-6 | is.na(alpha))
-#     
-#     if (!is.null(target_beta)) {
-#       dat <- dat %>% filter(abs(beta - target_beta) < 1e-6 | is.na(beta))
-#     }
-#     
-#     dat <- dat %>% filter(score_type != "vanilla_train")
-#     
-#     # HDC Singleton Logic
-#     hdc_pts <- dat %>%
-#       filter(score_type == "vanilla_full", exp == "point_valued") %>%
-#       mutate(exp = "set_valued", marginal = TRUE, score_type = "vanilla_full",
-#              set_cov = point_acc, set_size = 1.0)
-#     
-#     dat <- dat %>% 
-#       filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>% 
-#       bind_rows(hdc_pts)
-#     
-#     dat %>%
-#       group_by(score_type) %>%
-#       summarise(
-#         Cov = ifelse(all(is.na(set_cov[exp == "set_valued" & marginal])), "-", 
-#                      sprintf("%.3f", mean(set_cov[exp == "set_valued" & marginal], na.rm=TRUE))),
-#         Size = ifelse(all(is.na(set_size[exp == "set_valued" & marginal])), "-", 
-#                       sprintf("%.3f", mean(set_size[exp == "set_valued" & marginal], na.rm=TRUE))),
-#         AUROC = ifelse(all(is.na(ood_auroc[exp == "ood" & marginal])), "-", 
-#                        sprintf("%.3f", mean(ood_auroc[exp == "ood" & marginal], na.rm=TRUE))),
-#         .groups = "drop"
-#       ) %>%
-#       mutate(Method = case_when(
-#         score_type == "vanilla_full" ~ "HDC",
-#         score_type == "inverse_quantile" ~ "Inv. quantile",
-#         score_type == "penalized" ~ "Penalized",
-#         score_type == "sim" ~ "Similarity",
-#         score_type == "ratio" ~ "CHDC-ratio",
-#         score_type == "discount" ~ "CHDC-discount",
-#         TRUE ~ score_type
-#       ))
-#   }
-#   
-#   # Prepare Dataset Summaries
-#   iso_summ <- get_summary(iso_df, iso_alpha)
-#   mni_summ <- get_summary(mnist_df, mnist_alpha)
-#   lng_summ <- get_summary(lang_df, lang_alpha)
-#   
-#   # Prepare Specific Rat Summary
-#   rat_map <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
-#   rat_data_filtered <- odor_df %>% 
-#     mutate(Rat_Full = rat_map[rat_id + 1]) %>%
-#     filter(Rat_Full == rat_name)
-#   
-#   rat_summ <- get_summary(rat_data_filtered, rat_alpha, rat_beta)
-#   
-#   # Join all 4 sources
-#   final_tab <- mni_summ %>%
-#     select(Method, Cov_Mni = Cov, Size_Mni = Size, AUROC_Mni = AUROC) %>%
-#     full_join(lng_summ %>% select(Method, Cov_Lng = Cov, Size_Lng = Size, AUROC_Lng = AUROC), by = "Method") %>%
-#     full_join(iso_summ %>% select(Method, Cov_Iso = Cov, Size_Iso = Size, AUROC_Iso = AUROC), by = "Method") %>%
-#     full_join(rat_summ %>% select(Method, Cov_Rat = Cov, Size_Rat = Size, AUROC_Rat = AUROC), by = "Method") %>%
-#     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized", 
-#                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
-#   
-#   # LaTeX Formatting
-#   align_str <- "l|l|ccc|ccc|ccc|ccc|"
-#   additor <- list(pos = list(0), command = paste0(
-#     "\\hline\n",
-#     " & \\multicolumn{3}{c|}{\\textbf{MNIST ($\\alpha=", mnist_alpha, "$)}} ",
-#     "& \\multicolumn{3}{c|}{\\textbf{Languages ($\\alpha=", lang_alpha, "$)}} ",
-#     "& \\multicolumn{3}{c|}{\\textbf{ISOLET ($\\alpha=", iso_alpha, "$)}} ",
-#     "& \\multicolumn{3}{c|}{\\textbf{", rat_name, " ($\\alpha=", rat_alpha, "$)}} \\\\\n",
-#     "\\cline{2-13}\n",
-#     "\\textbf{Method} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} & \\textbf{Cov.} & \\textbf{Size} & \\textbf{AUC} \\\\\n",
-#     "\\hline\n"
-#   ))
-#   
-#   ltx <- xtable(final_tab, align = align_str)
-#   
-#   # Print/Save logic
-#   if (!is.null(save_path)) {
-#     if (!dir.exists(dirname(save_path))) dir.create(dirname(save_path), recursive = TRUE)
-#     print(ltx, file = save_path, floating = FALSE, include.rownames = FALSE, include.colnames = FALSE,
-#           sanitize.text.function = function(x) x, add.to.row = additor, hline.after = c(nrow(final_tab)), comment = FALSE)
-#     cat(paste("Saved combined tabular to:", save_path, "\n"))
-#   } else {
-#     print(ltx, floating = FALSE, include.rownames = FALSE, include.colnames = FALSE,
-#           sanitize.text.function = function(x) x, add.to.row = additor, hline.after = c(nrow(final_tab)), comment = FALSE)
-#   }
-# }
-# 
-# #------------------
-# # Execution
-# #------------------
-# table_dir <- '../../results/tables/benchmark_summary_with_rat.tex'
-# 
-# # Execute the function
-# create_combined_with_rat_table(
-#   iso_df      = isolet_data, 
-#   mnist_df    = mnist_data, 
-#   lang_df     = languages_data, 
-#   odor_df     = odor_data, 
-#   iso_alpha   = 0.02, 
-#   mnist_alpha = 0.05, 
-#   lang_alpha  = 0.01, 
-#   rat_name    = "Buchanan", 
-#   rat_alpha   = 0.2, 
-#   rat_beta    = 0.3, 
-#   save_path   = table_dir
-# )
+plots = plot_odor_results(
+  odor_data, 
+  save_path = paste0("/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/odor_decoding/odor_summary.pdf"))
+ 
