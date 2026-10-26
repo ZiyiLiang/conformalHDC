@@ -26,18 +26,18 @@ load_exp_results <- function(results_dir, pattern = "^seed.*_alpha.*\\.csv$"){
 #   - Set Coverage = Point Accuracy
 #   - Set Size     = 1.0
 summary_vanilla_hdc <- function(data){
-
+  
   return(
     data %>%
-    filter(score_type == "vanilla_full", exp == "point_valued") %>%
-    select(random_state, point_acc, macro_ap,macro_auprc, any_of(c("alpha", "sigma"))) %>%    
-    mutate(
-      exp = "set_valued",
-      marginal = TRUE,
-      score_type = "vanilla_full",
-      set_cov = point_acc, # Coverage becomes Accuracy
-      set_size = 1.0       # Size is always 1
-    ))
+      filter(score_type == "vanilla_full", exp == "point_valued") %>%
+      select(random_state, point_acc, macro_ap,macro_auprc, any_of(c("alpha", "sigma"))) %>%    
+      mutate(
+        exp = "set_valued",
+        marginal = TRUE,
+        score_type = "vanilla_full",
+        set_cov = point_acc, # Coverage becomes Accuracy
+        set_size = 1.0       # Size is always 1
+      ))
   
 }
 
@@ -92,7 +92,7 @@ summary_ood_val <- function(data, ...){
 #-------------------------------------------------------------------------------
 #                           Formatting functions
 #-------------------------------------------------------------------------------
- 
+
 # format_metric <- function(val_mean, val_se) {
 #   ifelse(is.na(val_mean), "-", sprintf("%.3f (%.3f)", val_mean, val_se))
 # }
@@ -184,7 +184,7 @@ RUNTIME_METHODS <- c(split_marginal = "Set-valued marg.", split_conditional = "S
 # timing_seed*.csv rows: training, calibration (one-time), and per-repetition test
 # encoding / HDC inference / conformal overhead on the full test split.
 plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") { 
-  
+  lw <- 0.25 / (.pt * 0.75)
   stage_cols <- c(training  = "#DCE1E6",   # pale blue-grey
                   inference = "#8E99A4",   # slate grey
                   conformal = "#B40F20")   # deep red
@@ -196,7 +196,7 @@ plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
       calibration = ifelse(is.na(calibration), 0, calibration),
       conformal_w_cal = conformal + calibration,
       .keep = "unused"
-      ) %>%
+    ) %>%
     rename(conformal = conformal_w_cal) %>% 
     group_by(method) %>%
     summarise(across(names(stage_cols), \(x) mean(x, na.rm = TRUE)), .groups = "drop") %>%
@@ -214,7 +214,7 @@ plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
                           sprintf("%.2f s", conf)))
   
   cpu_name <- unique(uci_har_timing$cpu)[1]
-  lw <- 0.25 / (.pt * 0.75)
+
   p_time <- ggplot(long, aes(x = method, y = time, fill = stage)) +
     geom_col(aes(linewidth = stage == "conformal",
                  color     = stage == "conformal"),
@@ -376,10 +376,14 @@ plot_exp_results <- function(results, target_alpha, delta_ylim = c(-0.01,0.01), 
 # Neural decoding -------------------
 library(ggpattern)
 plot_odor_results = function(odor_data,save_path){
-  # Map rat_id to names
+  # settings
   rat_names <- c('Barat', 'Buchanan', 'Mitt', 'Stella', 'Superchris')
   methods_order <- c("CHDC-ratio", "CHDC-discount", "Inv. quantile",
                      "Penalized", "Similarity", "HDC")
+  score_fill["CHDC-discount"] <- "#972D15"
+  
+  score_pattern <- setNames(ifelse(methods_order == "CHDC-discount", "stripe", "none"),
+                            methods_order)
   # HDC
   HDC = odor_data %>%
     filter(score_type %in% c("vanilla_full", "vanilla_train"), exp == "point_valued") %>%
@@ -427,30 +431,59 @@ plot_odor_results = function(odor_data,save_path){
     mutate(method = factor(method, levels = methods_order)) 
   
   # ---- One barplot row: one panel per rat ----
-  bar_plot <- function(m, ylab,tag, ylim = NULL, keep = function(d) d) {
+  lw <- 0.25 / (.pt * 0.75)
+  # bar_plot <- function(m, ylab,tag, ylim = NULL, keep = function(d) d) {
+  #   dat %>%
+  #     filter(metric == m) %>%
+  #     keep() %>%
+  #     ggplot(aes(x = method, y = u, fill = method)) + 
+  #     geom_col_pattern(aes(fill = method, pattern = method),
+  #                      width = 0.8, colour = NA,
+  #                      pattern_fill    = "white",
+  #                      pattern_colour  = NA,
+  #                      pattern_angle   = 45,
+  #                      pattern_density = 0.1,
+  #                      pattern_spacing = 0.05,
+  #                      show.legend     = TRUE) +  
+  bar_plot <- function(m, ylab, tag, keep = function(d) d) {
     dat %>%
       filter(metric == m) %>%
       keep() %>%
-      ggplot(aes(x = method, y = u, fill = method)) + 
-      geom_linerange(aes(ymin = u - se, ymax = u + se), linewidth = 4 * lw,colour = 'black') + 
-      facet_wrap(~ rat, nrow = 1) +
-      geom_col(aes(fill = method, colour = method, linetype = method),
-               width = 0.6, linewidth = 2 * lw, alpha = 0.8) +
+      group_by(rat) %>%                                   # baseline per rat panel
+      mutate(lo   = min(u - se, na.rm = TRUE),
+             hi   = max(u + se, na.rm = TRUE),
+             base = lo - 0.15 * (hi - lo)) %>%
+      ungroup() %>%
+      ggplot(aes(x = method, fill = method)) +
+      geom_tile_pattern(aes(y = (base + u) / 2, height = u - base, pattern = method),
+                        width = 0.8, colour = NA,
+                        pattern_fill    = "white",
+                        pattern_colour  = NA,
+                        pattern_angle   = 45,
+                        pattern_density = 0.1,
+                        pattern_spacing = 0.05,
+                        show.legend     = TRUE) +
+      geom_linerange(aes(ymin = u - se, ymax = u + se), linewidth = 4 * lw, colour = "black") +
+      facet_wrap(~ rat, nrow = 1, scales = "free_y") +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.05))) +
       scale_fill_manual(values = score_fill, drop = FALSE) +
-      scale_colour_manual(values = score_line, drop = FALSE) +
-      scale_linetype_manual(values = score_lty, drop = FALSE) +
-      labs(x = NULL, y = ylab, tag = tag, fill = NULL, colour = NULL, linetype = NULL) +
-      guides(fill = guide_legend(nrow = 1),
-             colour = guide_legend(nrow = 1),
-             linetype = guide_legend(nrow = 1)) +
-      coord_cartesian(ylim = ylim)+ 
+      scale_pattern_manual(values = score_pattern, drop = FALSE) +
+      labs(fill = NULL, pattern = NULL,x = NULL, y = ylab, tag = tag, colour = NULL, linetype = NULL) +
+      guides(
+        fill = guide_legend(nrow = 1), 
+               colour = guide_legend(nrow = 1),
+               linetype = guide_legend(nrow = 1),
+              pattern = guide_legend(nrow = 1)) +
+      # coord_cartesian(ylim = ylim)+ 
+      geom_linerange(aes(ymin = u - se, ymax = u + se), linewidth = 5 * lw,colour = 'black') + 
+      facet_wrap(~ rat, nrow = 1,scales = 'free_y') + 
       theme_bw(base_size = 7, base_family = "Arial") +
       theme(axis.text        = element_text(size = 6, colour = "black"),
             axis.title       = element_text(size = 7),
             axis.text.x      = element_blank(),
             axis.ticks.x     = element_blank(),
             strip.background = element_blank(),
-            strip.text       = element_text(size = 7),
+            strip.text       = element_text(size = 7, face = "bold"),
             legend.text      = element_text(size = 6),
             legend.key.size  = unit(2.5, "mm"),
             legend.position  = "none",
@@ -458,6 +491,7 @@ plot_odor_results = function(odor_data,save_path){
             axis.line    = element_line(colour = "black", linewidth = lw),
             panel.grid.major = element_blank(),
             panel.grid.minor = element_blank(),
+            panel.spacing.x = unit(4, "mm"),
             plot.tag         = element_text(size = 8, face = "bold"),
             plot.tag.position = "topleft")
   }
@@ -466,21 +500,22 @@ plot_odor_results = function(odor_data,save_path){
                  keep = \(d) filter(d, method != "HDC" & method !='CHDC-discount'))
   p2 <- bar_plot("ap", "Average precision", "d.",
                  keep = \(d) filter(d, method != "CHDC-discount"))
-  p3 <- bar_plot("auc", "OOD AUC", "e.", ylim = c(0.5, 1),
-                 keep = \(d) filter(d, method == "CHDC-discount" | u > 0.5))
+  p3 <- bar_plot("auc", "OOD AUC", "e.", 
+                 keep = \(d) filter(d, method != "CHDC-ratio",
+                                    method == "CHDC-discount" | u > 0.5))
   
   
   # ---- Full figure: rows stacked, rat names on top, legend at bottom ----
   no_strip <- theme(strip.text = element_blank())
   
-  fig <- rbind(ggplotGrob(p1  + theme(legend.position = "top")),
+  fig <- rbind(ggplotGrob(p1),
                ggplotGrob(p2 + no_strip),
-               ggplotGrob(p3 + no_strip),
+               ggplotGrob(p3 + no_strip + theme(legend.position = "bottom")),
                size = "max")
   
   grid::grid.newpage(); grid::grid.draw(fig)   # preview
-  
-  ggsave(save_path, fig, width = 170, height = 90, units = "mm", device = cairo_pdf) 
+  ggsave(sub("\\.pdf$", ".svg", save_path), fig,
+         width = 180, height = 80, units = "mm", device = svglite::svglite) 
 }
 # 
 # # boxplot for 5 rats

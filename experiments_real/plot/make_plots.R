@@ -8,17 +8,17 @@ library(tidyverse)
 library(xtable)
 library(stringr)
 library(gridExtra)
-source("~/ConformalHDC/conformalHDC/experiments_real/plot/common.R")
+source("common.R")
 
 # CHANGE THIS!
-RESULT_ROOT = "/scratch/cora_to_zoey/chdc/exp_real_efficiency/results"
-OUT_ROOT  = '/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table'
+RESULT_ROOT = "~/Documents/BF_Lab/PhD-project/03_conformalHDC/results/exp_real_efficiency/results"
+OUT_ROOT  = '~/Documents/BF_Lab/PhD-project/03_conformalHDC/results/exp_real_efficiency/results/table'
 
 
 #-------------------------------------------------------------------------------
 #                           MNIST Exp
 #-------------------------------------------------------------------------------
-  
+
 create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -53,26 +53,26 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   set_metrics <- dat %>%
     filter(method == "split_conformal") %>%
     summary_set_val()
-
+  
   # jk
   set_metrics_jk <- dat %>%
     filter(method == "jackknife_plus") %>%
     summary_set_val()
-
+  
   # fcp
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val()
-
+  
   # --- B. Point-Valued Metrics ---
   point_metrics <- dat %>%
     summary_point_val()
-
-
+  
+  
   # --- C. OOD Metrics ---
   ood_metrics <- dat %>%
     summary_ood_val()
-
+  
   # --- D. Merge & Format ---
   base <- tibble(score_type = unique(dat$score_type))
   
@@ -83,7 +83,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
     left_join(set_metrics_fcp %>% rename_with(~ paste0("fcp_", .), -score_type), by = "score_type") %>%
     left_join(point_metrics, by = "score_type") %>%
     left_join(ood_metrics,   by = "score_type")
-
+  
   formatted <- joined %>%
     transmute(
       score_type = score_type,
@@ -117,10 +117,10 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
     select(Method, Cov_std, Size_std, Accuracy,AveragePrecision, AUROC)
   formatted_set_compare = formatted%>%
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
-
+  
   # --- F. Construct and save to LaTeX---
   # Structure: Method | Cov Size | Acc | OOD |
-
+  
   export_latex_table(
     df = formatted_standard,
     align_str = "|l|cc|cc|c|",
@@ -128,7 +128,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
     save_dir = save_dir,
     file_name = if (exists("target_alpha")) paste0("mnist_table_alpha", target_alpha, ".tex") else "mnist_table.tex"
   )
-
+  
   # Structure: Method | Cov Size | Cov Size | Cov Size
   export_latex_table(
     df = formatted_set_compare,
@@ -139,13 +139,13 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   )
   return(formatted)
 }
- 
+
 #------------------
 # Save Table 
 #------------------
 # Set your results directory here
 setwd(RESULT_ROOT) 
-mnist_data= load_exp_results("./mnist/" )
+mnist_data = load_exp_results("./mnist/")
 
 table_dir <- paste0(OUT_ROOT,'/mnist')
 
@@ -157,7 +157,6 @@ plots <- plot_exp_results(mnist_results, target_alpha = 0.05,save_path =  "/scra
 #-------------------------------------------------------------------------------
 #                           Fashion MNIST Exp
 #-------------------------------------------------------------------------------
-
 create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -297,7 +296,7 @@ plots <- plot_exp_results(fminst_results, target_alpha = 0.05,save_path =  paste
 #-------------------------------------------------------------------------------
 #                           PAMAP2 physical activity
 #-------------------------------------------------------------------------------
- 
+
 create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -316,7 +315,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   # Treat HDC (vanilla_full) as producing a singleton set:
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
-   hdc_as_sets <- summary_vanilla_hdc(dat)
+  hdc_as_sets <- summary_vanilla_hdc(dat)
   # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
   dat <- dat %>%
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
@@ -416,7 +415,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   return(formatted)
 } 
 
- 
+
 #------------------
 # Save Table 
 #------------------
@@ -436,7 +435,7 @@ plots <- plot_exp_results(pamap2_results, target_alpha = 0.1, delta_ylim = c(-0.
 #-------------------------------------------------------------------------------
 #                           UCI HAR Exp
 #-------------------------------------------------------------------------------
-  
+
 create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   
   # Filter Data by Alpha 
@@ -490,7 +489,7 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   # --- C. OOD Metrics ---
   ood_metrics <- dat %>%
     summary_ood_val()
- 
+  
   
   # --- D. Merge & Format ---
   base <- tibble(score_type = unique(dat$score_type))
@@ -571,7 +570,7 @@ plots <- plot_exp_results(ucihar_results, target_alpha = 0.1,delta_ylim = c(-0.0
 # Runtime breakdown (timing_seed*.csv written next to the result CSVs)
 uci_har_timing = load_exp_results("./uci_har/", pattern = "^timing_seed.*_alpha.*\\.csv$")
 plot_runtime(uci_har_timing, target_alpha = 0.1, save_dir = table_dir)
- 
+
 #-------------------------------------------------------------------------------
 #                           Combined Summary Table
 #-------------------------------------------------------------------------------
@@ -674,7 +673,7 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
   dat <- dat %>%
     filter(!(score_type %in% c("vanilla_full", "vanilla_train") & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
-
+  
   # --- A. Set-Valued Metrics (Marginal Only) ---
   # spilt conformal
   set_metrics <- dat %>%
@@ -690,7 +689,7 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val(Rat_Full)
-
+  
   # --- B. Point-Valued Metrics ---
   point_metrics <- dat %>% 
     summary_point_val(Rat_Full) 
@@ -773,7 +772,7 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
     group_col  = "rat",
     file_name  = paste0("odor_decoding_full_alpha", target_alpha, ".tex")
   )
- 
+  
   
   #   for Standard, Jackknife, and FCP groups 
   comp_header_cmd <- paste0(
@@ -809,5 +808,4 @@ odor_table = create_odor_full_table(odor_data, target_alpha = 0.2, target_beta =
 # create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 plots = plot_odor_results(
   odor_data, 
-  save_path = paste0("/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/odor_decoding/odor_summary.pdf"))
- 
+  save_path = paste0(table_dir,"/odor_summary.pdf"))
