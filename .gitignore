@@ -189,6 +189,7 @@ paper/
 # zoeys edit
 z_exp
 archive
+archiv*/
 # Keep shared loading code while ignoring dataset contents.
 !/data/
 /data/*

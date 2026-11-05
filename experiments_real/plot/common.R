@@ -113,7 +113,7 @@ header_standard <- paste0(
 
 header_set_compare <- paste0(
   "\\toprule\n",
-  " & \\multicolumn{2}{@{}c@{}}{Standard} & \\multicolumn{2}{@{}c@{}}{Jackknife} & \\multicolumn{2}{@{}c@{}}{FCP} \\\\",
+  " & \\multicolumn{2}{@{}c@{}}{Split} & \\multicolumn{2}{@{}c@{}}{Jackknife+} & \\multicolumn{2}{@{}c@{}}{Full} \\\\",
   "Method & Coverage & Size & Coverage & Size & Coverage & Size \\\\\n",
   "\\midrule\n"
 )
@@ -220,7 +220,7 @@ plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
                  color     = stage == "conformal"),
              width = 0.6, position = position_stack(reverse = TRUE)) +
     scale_fill_manual(values = stage_cols,
-                      labels = c("Training", "Inference", "Conformal")) +
+                      labels = c("Training", "Testing", "Conformal")) +
     scale_linewidth_manual(values = c(`FALSE` = lw, `TRUE` = 4 * lw), guide = "none") +
     scale_color_manual(values = c(`FALSE` = "grey30", `TRUE` = "#B40F20"), guide = "none") +
     geom_text(data = conf_lab, aes(x = method, y = top, label = label),
@@ -513,7 +513,6 @@ plot_odor_results = function(odor_data,save_path){
                ggplotGrob(p3 + no_strip + theme(legend.position = "bottom")),
                size = "max")
   
-  grid::grid.newpage(); grid::grid.draw(fig)   # preview
   ggsave(sub("\\.pdf$", ".svg", save_path), fig,
          width = 180, height = 80, units = "mm", device = svglite::svglite) 
 }

@@ -8,11 +8,10 @@ library(tidyverse)
 library(xtable)
 library(stringr)
 library(gridExtra)
-source("common.R")
-
-# CHANGE THIS!
-RESULT_ROOT = "~/Documents/BF_Lab/PhD-project/03_conformalHDC/results/exp_real_efficiency/results"
-OUT_ROOT  = '~/Documents/BF_Lab/PhD-project/03_conformalHDC/results/exp_real_efficiency/results/table'
+# Local experiment inputs and generated plotting outputs.
+RESULT_ROOT <- "C:/Users/liang/Documents/GitHub/conformalHDC/results"
+OUT_ROOT <- file.path(RESULT_ROOT, "plots")
+source(file.path(dirname(RESULT_ROOT), "experiments_real", "plot", "common.R"))
 
 
 #-------------------------------------------------------------------------------
@@ -152,7 +151,6 @@ table_dir <- paste0(OUT_ROOT,'/mnist')
 # Generate for typical Alphas
 mnist_results = create_mnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
 # create_mnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
-plots <- plot_exp_results(mnist_results, target_alpha = 0.05,save_path =  "/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/mnist/mnist_full.pdf")
 
 #-------------------------------------------------------------------------------
 #                           Fashion MNIST Exp
@@ -290,7 +288,6 @@ table_dir <- paste0(OUT_ROOT,'/fashion_mnist')
 # Generate for typical Alphas
 fminst_results = create_fmnist_table(fmnist_data, target_alpha = 0.05, save_dir = table_dir)
 # create_fmnist_table(fmnist_data, target_alpha = 0.1,  save_dir = table_dir)
-plots <- plot_exp_results(fminst_results, target_alpha = 0.05,save_path =  paste0(table_dir,"/fmnist_full.pdf"))
 
 
 #-------------------------------------------------------------------------------
@@ -430,7 +427,6 @@ table_dir <- paste0(OUT_ROOT,'/pamap2')
 # Generate for typical Alphas
 pamap2_results = create_pamap2_table(pampa2_data, target_alpha = 0.1, save_dir = table_dir)
 # create_pamap2_table(pampa2_data, target_alpha = 0.2,  save_dir = table_dir)
-plots <- plot_exp_results(pamap2_results, target_alpha = 0.1, delta_ylim = c(-0.01,0.01), save_path =  paste0(table_dir,"/pamap2_full.pdf"))
 
 #-------------------------------------------------------------------------------
 #                           UCI HAR Exp
@@ -565,70 +561,73 @@ table_dir <- paste0(OUT_ROOT,'/uci_har')
 
 # Generate for typical Alphas
 ucihar_results = create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
-plots <- plot_exp_results(ucihar_results, target_alpha = 0.1,delta_ylim = c(-0.01,0.01), save_path =  paste0(table_dir,"/ucihar_full.pdf"))
 
 # Runtime breakdown (timing_seed*.csv written next to the result CSVs)
 uci_har_timing = load_exp_results("./uci_har/", pattern = "^timing_seed.*_alpha.*\\.csv$")
-plot_runtime(uci_har_timing, target_alpha = 0.1, save_dir = table_dir)
+timing_plot <- plot_runtime(uci_har_timing, target_alpha = 0.1, save_dir = table_dir)
 
 #-------------------------------------------------------------------------------
 #                           Combined Summary Table
 #-------------------------------------------------------------------------------
-make_dataset_table <- function(results_list, alphas, file = NULL) {
-  fmt <- function(x) ifelse(is.na(x), "-", sprintf("%.3f", x))
-  
-  # Bold the best value in a row: rule is "max", "min" or "none"; skip = excluded methods
-  fmt_row <- function(x, rule, skip) {
-    out  <- fmt(x)
-    cand <- round(x, 3)                 # compare at printed precision, so ties bold together
-    cand[skip] <- NA
-    if (rule == "none" || all(is.na(cand))) return(out)
-    best <- if (rule == "max") max(cand, na.rm = TRUE) else min(cand, na.rm = TRUE)
-    hit  <- !is.na(cand) & cand == best
-    out[hit] <- sprintf("\\textbf{%s}", out[hit])
-    out
+make_dataset_table <- function(results_list, alphas = NULL, file = NULL) {
+  # Keep the alphas argument for compatibility; the caption gives the levels.
+  datasets <- names(results_list)
+  if (!length(datasets) || anyNA(datasets) || any(!nzchar(datasets))) {
+    stop("results_list must be a named list of dataset summaries")
   }
-  
-  blocks <- lapply(results_list, function(res) res %>%
-                     ungroup() %>%
-                     filter(Method != "HDC (train)") %>%
-                     transmute(Method,
-                               cov  = ifelse(Method == "HDC", get_mean(Accuracy), get_mean(Cov_std)),
-                               size = ifelse(Method == "HDC", 1, get_mean(Size_std)),
-                               ap   = get_mean(AveragePrecision),
-                               auc  = get_mean(AUROC)))
-  
-  methods <- blocks[[1]]$Method
-  metrics <- c("Cov.", "Size", "AP", "AUC")
-  rules   <- c("none", "min", "max", "max")          # same order as metrics
-  is_hdc  <- methods == "HDC"
-  
-  body <- lapply(names(blocks), function(d) {
-    b     <- blocks[[d]]
-    nums  <- t(as.matrix(b[match(methods, b$Method), -1]))   # rows = metrics, cols = methods
-    cells <- t(sapply(seq_along(metrics), function(k)
-      fmt_row(nums[k, ], rules[k], skip = if (k == 2) is_hdc else FALSE)))
-    first <- c(sprintf("\\textbf{%s}", d),
-               sprintf("($\\alpha = %s$)", alphas[d]), "", "")
-    paste0(first, " & ", metrics, " & ", apply(cells, 1, paste, collapse = " & "), " \\\\")
+  datasets[datasets == "Fashion-MNIST"] <- "Fashion"
+  get_mean <- function(x) {
+    suppressWarnings(as.numeric(sub(" .*", "", trimws(as.character(x)))))
+  }
+  conformal_methods <- c("Inv. quantile", "Penalized", "Similarity",
+                         "CHDC-ratio", "CHDC-discount")
+  blocks <- lapply(results_list, function(res) {
+    required <- c("Method", "Size_std", "AveragePrecision", "AUROC")
+    if (!all(required %in% names(res)) || anyDuplicated(res$Method)) {
+      stop("Each dataset must have unique methods and size, AP, and AUC columns")
+    }
+    data.frame(Method = as.character(res$Method),
+               size = get_mean(res$Size_std),
+               ap = get_mean(res$AveragePrecision),
+               auc = get_mean(res$AUROC), stringsAsFactors = FALSE)
   })
-  body <- Reduce(function(a, b) c(a, "\\midrule", b), body)   # rule between datasets only
-  
+  metrics <- c(size = "Prediction-set size (Size) $\\downarrow$",
+               ap = "Average precision (AP) $\\uparrow$",
+               auc = "OOD detection AUC $\\uparrow$")
+  n_columns <- length(datasets) + 1L
+  row_end <- paste0(" ", strrep("\\", 2L))
   lines <- c(
-    paste0("\\begin{tabular*}{\\simtablewidth}{@{\\extracolsep\\fill}ll",
-           strrep("c", length(methods)), "}"),
+    paste0("\\begin{tabular}{@{}l",
+           strrep("c", length(datasets)), "@{}}"),
     "\\toprule",
-    paste0("Dataset & Metric & ", paste(methods, collapse = " & "), " \\\\"),
-    "\\midrule",
-    body,
-    "\\botrule",
-    "\\end{tabular*}"
+    paste0(" & ", paste(sprintf("\\textbf{%s}", datasets), collapse = " & "), row_end),
+    "\\midrule"
   )
+  for (metric in names(metrics)) {
+    # Vanilla HDC is comparable only in AP, not calibrated set size or OOD AUC.
+    methods <- if (metric == "ap") c("HDC", conformal_methods) else conformal_methods
+    values <- vapply(blocks, function(b) {
+      v <- b[[metric]][match(methods, b$Method)]
+      if (anyNA(v)) stop(paste("Missing", metric, "for a displayed method"))
+      v
+    }, numeric(length(methods)))
+    printed <- round(values, 3)
+    best <- apply(printed, 2L, if (metric == "size") min else max)
+    cells <- matrix(sprintf("%.3f", values), nrow = length(methods))
+    hit <- sweep(printed, 2L, best, "==")
+    cells[hit] <- sprintf("\\textbf{%s}", cells[hit])
+    if (metric != "size") lines <- c(lines, "\\midrule")
+    lines <- c(lines,
+      sprintf("\\multicolumn{%d}{c}{\\textit{%s}}%s",
+              n_columns, metrics[[metric]], row_end),
+      paste0(methods, " & ", apply(cells, 1L, paste, collapse = " & "), row_end))
+  }
+  lines <- c(lines, "\\botrule", "\\end{tabular}")
   if (!is.null(file)) writeLines(lines, file)
   cat(lines, sep = "\n")
   invisible(lines)
 }
-combined_path <- '/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/table/benchmark_dataset_summary.tex'
+combined_path <- file.path(OUT_ROOT, "benchmark_dataset_summary.tex")
 results_list <- list(MNIST           = mnist_results,
                      `Fashion-MNIST` = fminst_results, 
                      PAMAP2          = pamap2_results,
@@ -774,10 +773,10 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
   )
   
   
-  #   for Standard, Jackknife, and FCP groups 
+  #   for Split, Jackknife+, and Full groups
   comp_header_cmd <- paste0(
     "\\toprule\n",
-    " & & \\multicolumn{2}{@{}c@{}}{Standard} & \\multicolumn{2}{@{}c@{}}{Jackknife} & \\multicolumn{2}{@{}c@{}}{FCP} \\\\\n",
+    " & & \\multicolumn{2}{@{}c@{}}{Split} & \\multicolumn{2}{@{}c@{}}{Jackknife+} & \\multicolumn{2}{@{}c@{}}{Full} \\\\\n",
     "Rat & Method & Coverage & Size & Coverage & Size & Coverage & Size \\\\\n",
     "\\midrule\n"
   )
@@ -806,6 +805,7 @@ table_dir <- paste0(OUT_ROOT,'/odor_decoding')
 
 odor_table = create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 # create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
+setwd(OUT_ROOT)
 plots = plot_odor_results(
   odor_data, 
   save_path = paste0(table_dir,"/odor_summary.pdf"))
