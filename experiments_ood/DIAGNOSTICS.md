@@ -26,9 +26,9 @@ Each successful group writes score and ROC CSVs compressed with gzip, AUC and
 operating-point CSVs, and a checksummed completion marker. Score rows retain the
 input sample index, original class label and partition. ROC curves treat OOD as
 positive, use `-ID_score`, and retain all thresholds. Calibrated rejection remains
-the original strict `ID_score < cutoff` rule. A compatible completed diagnostic
-group is skipped; incompatible or partial existing outputs cause a clear error.
-There is no force-overwrite option.
+the original strict `ID_score < cutoff` rule. A group is skipped when all four expected result files exist.
+Partial existing outputs cause an error and are not overwritten. Source hashes
+are retained as provenance only. There is no force-overwrite option.
 
 The baseline-versus-diagnostic comparisons, baseline checksum snapshots and their
 reports are separate temporary verification artifacts outside both repositories.
@@ -62,8 +62,8 @@ PYTHON="$(command -v python)" bash experiments_ood/submit_ood_diagnostics.sh \
   --dry-run --data-root /home/liangz25/conformalHDC/data
 ```
 
-The complete run contains **80 tasks: 20 jobs per dataset, five repetitions per
-job**, or 100 repetitions per dataset. It uses **one global array capped at 40
+A fresh full run contains **80 tasks: 20 jobs per dataset, five repetitions per
+job**, or 100 repetitions per dataset. Completed groups are skipped before submission. It uses **one global array capped at 40
 concurrent tasks**; four independently capped arrays are not used. The submitter
 refuses to proceed while the user already has other queued or running jobs, so
 the initial concurrency budget is explicit.

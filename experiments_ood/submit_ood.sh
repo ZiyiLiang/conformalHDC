@@ -101,16 +101,12 @@ print_command() {
 
 if (( ! dry_run )); then mkdir -p -- "$output_dir" "$log_dir"; fi
 for seed in "${seeds[@]}"; do
-    marker="$output_dir/seed${seed}_complete.json"
     auroc="$output_dir/seed${seed}_ood.csv"
     operating="$output_dir/seed${seed}_operating.csv"
-    if (( ! dry_run && ! force )) && [[ -s "$marker" && -s "$auroc" && -s "$operating" ]]; then
-        # Python verifies configuration, provenance, CSV hashes and row counts.
-        if bash "$job_script" "$seed" "${python_args[@]}" --check-complete; then
-            echo "Already complete: $exp_name seed group $seed"
-            completed=$((completed + 1))
-            continue
-        fi
+    if (( ! force )) && [[ -f "$auroc" && -f "$operating" ]]; then
+        echo "Already complete: $exp_name seed group $seed"
+        completed=$((completed + 1))
+        continue
     fi
 
     job_name="${exp_name}_seed${seed}"

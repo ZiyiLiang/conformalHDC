@@ -42,7 +42,7 @@ def parser():
     result.add_argument("--threads", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)))
     result.add_argument("--alpha-grid", nargs="+", type=float)
     result.add_argument("--check-complete", action="store_true",
-                        help="Validate a matching diagnostic export without loading the dataset")
+                        help="Check for expected diagnostic files without loading the dataset")
     return result
 
 
@@ -120,8 +120,7 @@ def export_repetition(dataset, X, y, random_state, args):
 
 def validate_export(marker, output, config):
     """Validate this export's schema and internal integrity, without reading legacy results."""
-    if (not common.run_configs_match(marker.get("run_config"), config, marker.get("git_revision")) or
-            any(marker.get(key) != value for key, value in marker["run_config"].items())):
+    if marker.get("run_config") != config or any(marker.get(key) != value for key, value in config.items()):
         raise ValueError("Diagnostic configuration does not match the requested run")
     if marker.get("files") != file_names(config["seed_group"]):
         raise ValueError("Unexpected diagnostic filenames")
@@ -224,11 +223,9 @@ def validate_export(marker, output, config):
 
 
 def is_complete(marker_path, config):
-    try:
-        marker = json.loads(marker_path.read_text(encoding="utf-8"))
-        return validate_export(marker, marker_path.parent, config)
-    except (OSError, ValueError, KeyError, TypeError, IndexError, pd.errors.ParserError):
-        return False
+    """A seed group is complete when all expected diagnostic files exist."""
+    return all((marker_path.parent / name).is_file()
+               for name in file_names(config["seed_group"]).values())
 
 
 def publish_new(temporary, target):

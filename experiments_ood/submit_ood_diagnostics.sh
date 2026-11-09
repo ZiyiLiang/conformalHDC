@@ -22,7 +22,7 @@ Usage: submit_ood_diagnostics.sh [options] [Python options]
 
 Other options, including --data-root, --dimension, --temperature, --device,
 --threads and --check-complete, are passed to the shared Python diagnostic runner.
-There is no force-overwrite option. Existing incompatible outputs cause an error.
+There is no force-overwrite option. Incomplete existing outputs cause an error.
 
 Environment: PYTHON, CHDC_ENV_PATH, CHDC_RESULTS_ROOT, CHDC_DATA_ROOT,
 CHDC_PARTITION, CHDC_JOB_MEMORY, CHDC_JOB_TIME, CHDC_JOB_CPUS.
@@ -108,11 +108,30 @@ done
 results_root="$(ood_path native "$results_root")"
 if [[ "$results_root" != /* && ! "$results_root" =~ ^[A-Za-z]:[\\/] ]]; then results_root="$PWD/$results_root"; fi
 run_script="$SCRIPT_DIR/run_ood_diagnostics.sh"
-task_count=$((${#datasets[@]} * ${#seeds[@]}))
+pending_tasks=()
+completed=0
 for dataset in "${datasets[@]}"; do
-    printf '%s: %s jobs x %s repetitions = %s repetitions\n' "$dataset" "${#seeds[@]}" "$repetitions" "$((${#seeds[@]} * repetitions))"
+    dataset_pending=0
+    dataset_completed=0
+    for seed in "${seeds[@]}"; do
+        prefix="$results_root/ood_diagnostics/ood_${dataset}/seed${seed}"
+        if [[ -f "${prefix}_scores.csv.gz" && -f "${prefix}_roc.csv.gz" &&
+              -f "${prefix}_ood.csv" && -f "${prefix}_operating.csv" ]]; then
+            completed=$((completed + 1))
+            dataset_completed=$((dataset_completed + 1))
+        else
+            pending_tasks+=("$dataset"$'\t'"$seed")
+            dataset_pending=$((dataset_pending + 1))
+        fi
+    done
+    printf '%s: %s complete; %s jobs x %s repetitions = %s repetitions pending\n' "$dataset" "$dataset_completed" "$dataset_pending" "$repetitions" "$((dataset_pending * repetitions))"
 done
-printf 'Total: %s jobs; maximum concurrent jobs: %s\n' "$task_count" "$max_concurrent"
+task_count=${#pending_tasks[@]}
+printf 'Total: %s complete; %s pending jobs; maximum concurrent jobs: %s\n' "$completed" "$task_count" "$max_concurrent"
+if (( task_count == 0 )); then
+    echo "All requested diagnostic result files already exist; no jobs run or submitted."
+    exit 0
+fi
 print_command() { printf '%q ' "$@"; printf '\n'; }
 
 if (( local_mode )); then
@@ -157,9 +176,7 @@ if [[ -n "$existing_jobs" ]]; then
     exit 2
 fi
 mkdir -p -- "$submission_dir"
-for dataset in "${datasets[@]}"; do
-    for seed in "${seeds[@]}"; do printf '%s\t%s\n' "$dataset" "$seed"; done
-done > "$task_map"
+printf '%s\n' "${pending_tasks[@]}" > "$task_map"
 submission="$("${command[@]}")"
 job_id="${submission%%;*}"
 if [[ ! "$job_id" =~ ^[0-9]+$ ]]; then echo "Unexpected sbatch response: $submission" >&2; exit 2; fi

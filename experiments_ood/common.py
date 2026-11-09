@@ -28,7 +28,6 @@ from conformal_inference.fast import class_prototypes
 from data.config import DATA_ROOT
 from hdc_encoder.image import encode_binary_images, make_position_hvs
 from hdc_encoder.level import encode_levels, make_im_cim
-from experiments_ood.completion import run_configs_match
 
 SCHEMA_VERSION = 1
 METHODS = ("maxsim", "discount", "energy")
@@ -247,7 +246,7 @@ def parser(dataset):
     result.add_argument("--threads", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", 1)))
     result.add_argument("--force", action="store_true")
     result.add_argument("--check-complete", action="store_true",
-                        help="Validate matching completion marker and CSVs without loading datasets")
+                        help="Check for expected result CSVs without loading datasets")
     return result
 
 
@@ -264,27 +263,10 @@ def run_config(dataset, args):
 
 
 def is_complete(marker_path, config):
-    try:
-        marker = json.loads(marker_path.read_text())
-        if not run_configs_match(marker["run_config"], config, marker.get("git_revision")):
-            return False
-        for key, multiplier in (("auroc", 1), ("operating", len(config["alpha_grid"]))):
-            path = marker_path.parent / marker["files"][key]
-            if sha256_file(path) != marker["sha256"][key]:
-                return False
-            frame = pd.read_csv(path)
-            if len(frame) != config["repetitions"] * len(METHODS) * multiplier:
-                return False
-            if set(frame["random_state"]) != set(config["random_states"]) or set(frame["method"]) != set(METHODS):
-                return False
-            columns = ["random_state", "method"] + (["alpha"] if key == "operating" else [])
-            if frame.duplicated(columns).any():
-                return False
-            if key == "operating" and not np.allclose(sorted(frame["alpha"].unique()), config["alpha_grid"]):
-                return False
-        return True
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
+    """A seed group is complete when both expected result CSVs exist."""
+    prefix = f"seed{config['seed_group']}"
+    return all((marker_path.parent / f"{prefix}_{kind}.csv").is_file()
+               for kind in ("ood", "operating"))
 
 
 def main(dataset):
