@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 1 seed w/ 4 repetitions takes 1 min, peaks memory <6GB
+# Four repetitions per seed group; memory includes the full OOD pool.
 
 # # --- QUICK TEST LIST ---
 # SEED_LIST=(1)
@@ -13,7 +13,7 @@ ALPHA_LIST=(0.05)
 EXPNAME="fashion_mnist"
 
 # Slurm parameters
-MEMO=8G                             
+MEMO=16G
 TIME=00-04:00:00                    
 CORE=1                              
 
