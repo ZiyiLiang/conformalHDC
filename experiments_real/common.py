@@ -23,7 +23,7 @@ from conformal_inference.fast import FastConformal, class_prototypes
 from conformal_inference.methods import CachedConformalHDC, ConformalHDC
 from conformal_inference.utils import eval_accuracy, eval_lc_accuracy
 from data.config import RESULTS_ROOT
-from hdc_encoder.level import encode_levels, make_im_cim
+from hdc_encoder.level import encode_levels, make_im_cim, quantize_to_levels
 from hdc_encoder.image import encode_binary_images, make_position_hvs
 
 REPETITIONS = 4
@@ -120,10 +120,6 @@ def loader_orders(passes, batch_size):
 def development_set(train, cal):
     """Train + calibration (hvs, labels), the data jackknife+ and full conformal fit on."""
     return np.concatenate((train[0], cal[0])), np.concatenate((train[1], cal[1]))
-
-def balance_ood(ood, n_test):
-    """Truncate the OOD split to at most as many samples as the test split."""
-    return ood[:min(len(ood), n_test)]
 
 def masked_sims_table(chdc, hvs, alphas):
     """masked[a, i, c]: similarity of hvs[i] to class c if c is in its label-conditional
@@ -374,7 +370,7 @@ def run_image_experiment(pixels, targets, labels_id, labels_ood, random_state, a
         cal = encode(cal_idx)
     with timed("encode_test"):
         test = encode(test_idx)
-    ood_hvs, _ = encode(balance_ood(ood_idx, len(test_idx)))
+    ood_hvs, _ = encode(ood_idx)
     log("Encoding complete.")
     return evaluate(train, cal, test, ood_hvs, labels_id, "bipolar", random_state, alpha)
 
@@ -383,28 +379,35 @@ def run_image_experiment(pixels, targets, labels_id, labels_ood, random_state, a
 
 # Level-encoded experiment flow
 
-def run_level_experiment(L, y, labels_id, labels_ood, test_size, levels, random_state, alpha,
+def run_level_experiment(X, y, labels_id, labels_ood, test_size, levels, random_state, alpha,
                          dim=10_000):
-    """One repetition on quantized tabular features L (UCI HAR, ISOLET): split the ID
-    data into train/calib/test, level-encode, and evaluate with ternary prototypes."""
+    """Split raw ID features, fit quantization on training only, and level-encode
+    every partition using those fixed ranges and ternary prototypes."""
     seed_everything(random_state)
     id_mask = np.isin(y, labels_id)
     X_train_full, X_test, y_train_full, y_test = train_test_split(
-        L[id_mask], y[id_mask], test_size=test_size, random_state=random_state, stratify=y[id_mask],
+        X[id_mask], y[id_mask], test_size=test_size, random_state=random_state, stratify=y[id_mask],
     )
     X_train, X_cal, y_train, y_cal = train_test_split(
         X_train_full, y_train_full, test_size=0.4, random_state=random_state, stratify=y_train_full,
     )
     log(f"ID: {len(X_train)} train, {len(X_cal)} calib, {len(X_test)} test.")
 
-    iM, CiM = make_im_cim(L.shape[1], levels, dim, DEVICE)
+    # Keep calibration, test and OOD values out of the fitted feature ranges.
+    reference = X_train
+    X_train = quantize_to_levels(X_train, levels, reference=reference)
+    X_cal = quantize_to_levels(X_cal, levels, reference=reference)
+    X_test = quantize_to_levels(X_test, levels, reference=reference)
+    X_ood = quantize_to_levels(X[np.isin(y, labels_ood)], levels, reference=reference)
+
+    iM, CiM = make_im_cim(X.shape[1], levels, dim, DEVICE)
     with timed("encode_train"):
         train = encode_levels(X_train, iM, CiM), y_train
     with timed("encode_cal"):
         cal = encode_levels(X_cal, iM, CiM), y_cal
     with timed("encode_test"):
         test = encode_levels(X_test, iM, CiM), y_test
-    ood_hvs = encode_levels(balance_ood(L[np.isin(y, labels_ood)], len(X_test)), iM, CiM)
+    ood_hvs = encode_levels(X_ood, iM, CiM)
     log("Encoding complete.")
     return evaluate(train, cal, test, ood_hvs, labels_id, "ternary", random_state, alpha)
 

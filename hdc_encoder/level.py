@@ -12,10 +12,11 @@ def bipolar_sign(x):
     return torch.where(x >= 0, torch.ones_like(x), -torch.ones_like(x))
 
 
-def quantize_to_levels(X, levels):
-    """Min-max scale every feature and round it to an integer level in [0, levels - 1]."""
-    Xmin = X.min(axis=0)
-    rng = np.maximum(X.max(axis=0) - Xmin, 1e-8)
+def quantize_to_levels(X, levels, reference=None):
+    """Quantize using reference feature ranges; default to the input's own ranges."""
+    reference = X if reference is None else reference
+    Xmin = reference.min(axis=0)
+    rng = np.maximum(reference.max(axis=0) - Xmin, 1e-8)
     return np.clip(np.round((X - Xmin) / rng * (levels - 1)), 0, levels - 1).astype(np.int64)
 
 

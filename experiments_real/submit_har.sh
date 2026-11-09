@@ -11,7 +11,7 @@ ALPHA_LIST=(0.1)
 # ALPHA_LIST=(0.1 0.15 0.2)
 
 # Slurm parameters
-EXPNAME="uci_har_timing"
+EXPNAME="uci_har"
 MEMO=8G                            
 TIME=00-03:00:00                 
 CORE=1                        
@@ -21,7 +21,7 @@ ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="
 
 # Directories
 LOGS="logs/"$EXPNAME
-OUT_DIR="/scratch/cora_to_zoey/chdc/exp_real_efficiency/results/"$EXPNAME  # RESULTS_ROOT in data/config.py
+OUT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/results/$EXPNAME"  # RESULTS_ROOT in data/config.py
 
 mkdir -p $LOGS
 mkdir -p $OUT_DIR

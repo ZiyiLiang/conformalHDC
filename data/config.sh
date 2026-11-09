@@ -1,5 +1,5 @@
 #!/bin/bash
 
-# Paths are relative to the experiment directory where you submit jobs.
-ENV_PATH="../chdc"
-source "$ENV_PATH/bin/activate"
+# Conda environment verified on the remote Slurm server.
+source "/pkg/anaconda3/2022.10/etc/profile.d/conda.sh"
+conda activate hdc
