@@ -1,10 +1,8 @@
 from pathlib import Path
 
-#NOTE Set this to your dataset folder.
-# DATA_ROOT = Path("../data")
+# Dataset root.
 DATA_ROOT = Path("/scratch/cora_to_zoey/data")
 
 
-#NOTE Results CSVs go to RESULTS_ROOT/<exp_name>/; keep in sync with OUT_DIR in the
-# submit_*.sh scripts and RESULT_ROOT in experiments_real/plot/make_plots.R.
+# Result CSVs are stored under RESULTS_ROOT/<exp_name>/.
 RESULTS_ROOT = Path(__file__).resolve().parents[1] / "results"

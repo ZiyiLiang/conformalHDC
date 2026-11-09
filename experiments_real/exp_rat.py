@@ -26,7 +26,6 @@ RUNNING_WINDOW = (0, 200)
 BIN_SIZE = 25
 SLICING_WINDOW = 200
 STEP_BINS = 2
-# Preserve the original RAT schema, including the positions of the point metrics.
 COLUMNS = ["exp", "method", "random_state", "rat_id", "score_type", "alpha", "beta",
            "marginal", "set_cov", "set_size", "lc_covs", "point_acc", "lc_accs",
            "ood_auroc", "macro_ap", "macro_auprc", "macro_f1"]
@@ -62,7 +61,7 @@ def prepare_models(rff, train, cal, test, ood_hvs, labels, random_state):
     proto_train = build_prototypes(rff, *train, labels)
     proto_full = build_prototypes(rff, *full, labels)
     log("Prototypes built.")
-    # Split conformal historically uses seed 0; retain it for randomized scores.
+    # Use seed 0 for split-conformal score randomization.
     chdc = CachedConformalHDC(proto_train, labels, sim_measure="complex_cosine").cache_similarities(
         cal[0], test[0], ood_hvs,
     )
@@ -116,7 +115,6 @@ if __name__ == "__main__":
     # Directory Setup
     out_dir = RESULTS_ROOT / EXP_NAME
     out_dir.mkdir(parents=True, exist_ok=True)
-    # rat_name = ['Barat','Buchanan','Mitt','Stella','Superchris']
     outfile = out_dir / f"rat{rat_arg}_seed{seed_arg}_alpha{alpha_arg}_beta{beta_arg}.csv"  
 
     print(f"Starting job: Rat {rat_arg}, Seed {seed_arg}, Alpha {alpha_arg}, Beta {beta_arg}, Reps {REPETITIONS}")

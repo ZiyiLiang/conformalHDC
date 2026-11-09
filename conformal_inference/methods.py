@@ -325,9 +325,9 @@ class ConformalHDC():
         '''
         if not self._is_calibrated():
             return
-        # prediction sets, when the score <= conformal scores
+        # Include labels whose nonconformity scores do not exceed the calibration thresholds.
         if isinstance(alpha, np.ndarray):
-            # adaptively choose alpha per class
+            # Use the supplied class-specific significance levels.
             keep = self._test_scores(test_HVs, **kwargs) <= self._adap_thresholds(alpha, marginal) # (n, nc) <= (nc, )
         elif isinstance(alpha, float):
             keep = self._test_scores(test_HVs, **kwargs) <= self._thresholds(alpha, marginal) # (n, nc) <= (nc, )
@@ -337,7 +337,7 @@ class ConformalHDC():
 
         # Trim each pset to its most similar class; argmax keeps the first of tied classes.
         best_in_set = np.argmax(np.where(keep, sims, -np.inf), axis=1)
-        # if empty pset, choose ordinary HDC predictions
+        # Compute fallback predictions for empty sets.
         best_overall = np.argmax(sims, axis=1)
         return [
             [self.class_labels[in_set]] if row.any()
@@ -371,10 +371,10 @@ class ConformalHDC():
             all_calib = np.sort(np.ravel(self.calib_scores))
             n_calib = len(all_calib)
 
-            # Since we assume High Score = Outlier, the "predicted" class is the one with the Lowest nonconformity score (best fit).
+            # The minimum candidate score gives the largest marginal p-value.
             min_test_scores = np.min(test_scores_matrix, axis=1)
 
-            # Calculate p-value against the all calibration points
+            # Compare with the pooled calibration scores.
             ranks = np.searchsorted(all_calib, min_test_scores, side='left')
             return (n_calib - ranks + 1) / (n_calib + 1)
 

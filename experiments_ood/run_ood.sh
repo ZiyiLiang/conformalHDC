@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Shared launcher for the four current benchmark entry points.
+# Shared launcher for the four OOD comparison datasets.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/paths_ood.sh"
 if [[ $# -lt 1 ]]; then
@@ -15,8 +15,6 @@ case "$dataset" in
     *) echo "Unknown OOD dataset: $dataset" >&2; exit 2 ;;
 esac
 
-# Use an already activated environment, an explicit interpreter, or an optional
-# Linux virtual environment. The legacy ../chdc environment is never assumed.
 if [[ -n "${CHDC_ENV_PATH:-}" ]]; then
     environment_dir="$(ood_path native "$CHDC_ENV_PATH")"
     activate="${environment_dir%/}/bin/activate"
@@ -30,8 +28,7 @@ python_bin="${PYTHON:-python3}"
 entrypoint="$SCRIPT_DIR/ood_${dataset}.py"
 args=("$@")
 if [[ "${python_bin,,}" == *.exe ]]; then
-    # WSL cannot exec C:/... directly, and Windows Python cannot read /mnt/c/...
-    # as a Windows path. Keep every conversion explicit and preserve quoting.
+    # Windows Python needs Windows paths; Bash needs its native executable path.
     python_bin="$(ood_path native "$python_bin")"
     entrypoint="$(ood_path windows "$entrypoint")"
     converted=()

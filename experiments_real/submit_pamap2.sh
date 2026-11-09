@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# one seed, 4 repetition, takes 2 min, < 2GB
-# # --- QUICK TEST LIST ---
-# SEED_LIST=(1)
-# ALPHA_LIST=(0.1)
 
 # --- EXPERIMENT LIST ---
 SEED_LIST=($(seq 1 25))
@@ -15,7 +11,7 @@ MEMO=4G
 TIME=00-03:00:00                 
 CORE=1                        
 
-# Assemble order
+# Build the Slurm command.
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
 
 # Directories
@@ -51,7 +47,7 @@ for SEED in ${SEED_LIST[@]}; do
             OUTF=$LOGS"/"$JOBN".out"
             ERRF=$LOGS"/"$JOBN".err"
             
-            # Assemble slurm order
+            # Build the job submission command.
             ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
             
             # Print and Submit

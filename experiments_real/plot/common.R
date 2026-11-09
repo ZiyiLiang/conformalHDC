@@ -93,9 +93,6 @@ summary_ood_val <- function(data, ...){
 #                           Formatting functions
 #-------------------------------------------------------------------------------
 
-# format_metric <- function(val_mean, val_se) {
-#   ifelse(is.na(val_mean), "-", sprintf("%.3f (%.3f)", val_mean, val_se))
-# }
 
 # Vectorized helper function
 fmt <- function(u, se) ifelse(is.na(u), "-", sprintf("%.3f (%.3f)", u, se))
@@ -228,7 +225,7 @@ plot_runtime <- function(uci_har_timing, target_alpha = 0.1, save_dir = ".") {
               color = "#B40F20", family = "Arial") +
     annotate("text", x = Inf, y = Inf, label = paste("CPU:", cpu_name),
              hjust = 1.02, vjust = 1.5, size = 2, color = "grey30", family = "Arial") +
-    coord_cartesian(ylim = c(15, 30)) +
+    coord_cartesian(ylim = c(0, 30), expand = c(bottom = FALSE)) +
     labs(x = NULL, y = "Time (s)", fill = NULL) +
     theme_classic(base_size = 9, base_family = "Arial") +
     theme(axis.line   = element_line(linewidth = lw),
@@ -290,13 +287,13 @@ plot_exp_results <- function(results, target_alpha, delta_ylim = c(-0.01,0.01), 
   } 
   p1 <- bar_plot("ap", "Average precision") +                    # 1. average precision
     coord_cartesian(ylim = c(0, 1))
-  p2 <- bar_plot("coverage", "Coverage") +# 2. coverage (target 0.95)
+  p2 <- bar_plot("coverage", "Coverage") +
     geom_hline(yintercept = 1-target_alpha, linetype = "dashed",alpha = 0.6) +
     coord_cartesian(ylim = c(1-target_alpha - 0.025, min(1 - target_alpha +0.025,1)))
   p3 <- bar_plot("size", "Set size")                             #    set size
   p4 <- bar_plot("auc", "OOD AUC", legend = TRUE)                # 3. OOD detection AUC
   
-  # ---- 4. Retraining: difference of JK+ / full conformal from standard ----
+  # Coverage and size differences relative to split conformal.
   diff_long <- dat %>%
     select(method,
            coverage_std_mean = coverage,     coverage_std_se = coverage_se,
@@ -343,7 +340,7 @@ plot_exp_results <- function(results, target_alpha, delta_ylim = c(-0.01,0.01), 
   p_dcov  <- diff_plot("Coverage", "Δ Coverage", ylim = c(-0.01,0.01),legend = TRUE)
   p_dsize <- diff_plot("Set size", "Δ Set size",ylim = delta_ylim)
   # ---- Full figure: 7 pt Arial, 180 mm wide ----
-  #   col 1: coverage, set size | col 2: AP, OOD AUC | col 3: retraining differences
+  # Columns: coverage/set size, AP/OOD AUC, and coverage/size differences.
   fig_theme <- theme(text        = element_text(family = "Arial", size = 7),
                      axis.text   = element_text(size = 7),
                      axis.text.x = element_text(angle = 30, hjust = 1),
@@ -432,19 +429,6 @@ plot_odor_results = function(odor_data,save_path){
   
   # ---- One barplot row: one panel per rat ----
   lw <- 0.25 / (.pt * 0.75)
-  # bar_plot <- function(m, ylab,tag, ylim = NULL, keep = function(d) d) {
-  #   dat %>%
-  #     filter(metric == m) %>%
-  #     keep() %>%
-  #     ggplot(aes(x = method, y = u, fill = method)) + 
-  #     geom_col_pattern(aes(fill = method, pattern = method),
-  #                      width = 0.8, colour = NA,
-  #                      pattern_fill    = "white",
-  #                      pattern_colour  = NA,
-  #                      pattern_angle   = 45,
-  #                      pattern_density = 0.1,
-  #                      pattern_spacing = 0.05,
-  #                      show.legend     = TRUE) +  
   bar_plot <- function(m, ylab, tag, keep = function(d) d) {
     dat %>%
       filter(metric == m) %>%
@@ -474,7 +458,6 @@ plot_odor_results = function(odor_data,save_path){
                colour = guide_legend(nrow = 1),
                linetype = guide_legend(nrow = 1),
               pattern = guide_legend(nrow = 1)) +
-      # coord_cartesian(ylim = ylim)+ 
       geom_linerange(aes(ymin = u - se, ymax = u + se), linewidth = 5 * lw,colour = 'black') + 
       facet_wrap(~ rat, nrow = 1,scales = 'free_y') + 
       theme_bw(base_size = 7, base_family = "Arial") +
@@ -516,65 +499,3 @@ plot_odor_results = function(odor_data,save_path){
   ggsave(sub("\\.pdf$", ".svg", save_path), fig,
          width = 180, height = 80, units = "mm", device = svglite::svglite) 
 }
-# 
-# # boxplot for 5 rats
-# 
-# get_mean <- function(x) suppressWarnings(as.numeric(sub(" .*", "", trimws(x))))
-# get_se <- function(x) suppressWarnings(as.numeric(sub(".*\\((.*)\\).*", "\\1", trimws(x))))
-# 
-# plot_odor_results = function(odor_table, save_path){
-# 
-#   nrats = unique(odor_table$rat) %>% length()
-#   dat = odor_table %>%
-#     ungroup() %>%
-#     mutate(method      = factor(Method, levels = unique(Method)),
-#            coverage    = get_mean(Cov_std),
-#            size        = get_mean(Size_std),
-#            ap          = get_mean(AveragePrecision),
-#            auc         = get_mean(AUROC)) %>%
-#     filter(method != "HDC (train)")  %>%
-#     select(method, rat, coverage, size, auc, ap)
-# 
-# 
-#   # ---- 1. Average precision ----
-#   p1 = ggplot(dat, aes(x = method, y = ap, fill = method)) +
-#     geom_boxplot(
-#       width = 0.3, outlier.shape = NA, linewidth = lw,
-#       alpha = 0.25, color = 'darkgrey') +
-#     geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
-#     labs(y = "Average precision", x = 'Methods') +
-#     scale_color_manual(values = score_colors) +
-#     scale_fill_manual(values = score_colors) + theme_classic() +theme(legend.position = 'none')
-# 
-# 
-#   # ---- 2. Coverage vs. set size (target coverage = 1 - alpha = 0.8) ----
-#   p2 = ggplot(dat, aes(x = method, y = coverage, fill = method)) +
-#     geom_boxplot(
-#       linewidth = lw, width = 0.3, outlier.shape = NA, alpha = 0.25, color = 'darkgrey') +
-#     geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
-#     labs(y = "Coverage", x = 'Methods') +
-#     geom_hline(yintercept = 0.8, linetype = "dashed") +
-#     ylim(0.75,0.85)+
-#     scale_color_manual(values = score_colors) +
-#     scale_fill_manual(values = score_colors)+theme_classic()+theme(legend.position = 'none')
-# 
-# 
-#   p3 = ggplot(dat, aes(x = method, y = size, fill = method)) +
-#     geom_boxplot(linewidth = lw,width = 0.3, outlier.shape = NA, alpha = 0.25, color = 'darkgrey') +
-#     geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
-#     labs(y = "Set size", x = 'Methods') +
-#     scale_color_manual(values = score_colors) +
-#     scale_fill_manual(values = score_colors)+  theme_classic()+theme(legend.position = 'none')
-# 
-#   # ---- 3. OOD detection AUC (0.5 = chance) ----
-#   p4 = ggplot(dat, aes(x = method, y = auc, fill = method)) +
-#     geom_boxplot(linewidth = lw,width = 0.3, outlier.shape = NA, alpha = 0.3, color = 'darkgrey') +
-#     geom_jitter(aes(shape = rat, color = method), width = 0.1, height = 0, size = 3) +
-#     labs(y = "OOD AUC", x = 'Methods') +
-#     scale_color_manual(values = score_colors) +
-#     scale_fill_manual(values = score_colors)+ theme_classic()
-# 
-# 
-#   plots <- list(ap = p1, coverage = p2, size = p3, auc = p4)
-#   return(plots)
-# }

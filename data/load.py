@@ -241,7 +241,7 @@ def prep_loader_slicing(irat, split_ratio, in_path,
     
     print(f"Augmented Shape: {X_aug.shape}")
 
-    # Since all slices from Trial 1 share the same ID, they all go to Train OR Test.
+    # Keep each trial's slices together in one training, calibration or test split.
     splits = split_three(X_aug, y_aug, trial_aug, ratios=split_ratio, seed=seed)
     
     return splits

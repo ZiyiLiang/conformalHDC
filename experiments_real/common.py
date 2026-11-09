@@ -248,14 +248,11 @@ def conformal_rows(chdc, cal, test, ood_hvs, labels, jk_sets, fc_sets, random_st
                          **shared, **set_metrics(sets, test_y, labels)})
 
         # 2. Point-Valued Prediction
-        #NOTE adaptive alpha
         with timed(f"adaptive_{stype}"):
             adap_alpha = adaptive_alpha(chdc, cal_hvs, cal_y, labels)
-        # compute the score to choose alpha based on lc acc, then input the alpha list to this function to compute acc.
+        # Apply the class-specific alpha values selected on calibration data.
         with timed(f"point_valued_{stype}"):
             preds = chdc.point_valued_CP(test_hvs, adap_alpha, allow_empty=False, marginal=False)
-        # static alpha
-        #  preds = chdc.point_valued_CP(test_hvs, alpha, allow_empty=False, marginal=False)
         rows.append({"exp": "point_valued", **shared,
                      **point_metrics(preds, test_y, labels, chdc.get_class_p_values(test_hvs))})
 
@@ -380,7 +377,6 @@ def run_image_experiment(pixels, targets, labels_id, labels_ood, random_state, a
     return evaluate(train, cal, test, ood_hvs, labels_id, "bipolar", random_state, alpha)
 
 
-################======== Image experiment flows ========################
 
 # Level-encoded experiment flow
 

@@ -14,10 +14,10 @@ class RLoader:
         # load whole session data
         data_session = self.load_whole_session(spk_raw)
 
-        # load train data from R(I smoothed spike with sd=5 in R)
+        # Load training data preprocessed in R.
         train_data = self.load_train_data()
 
-        # pick current train based on my_train label
+        # Select the requested odor/state classes.
         no_null_train_data = [df.filter(pl.col('y')!=6) for df in train_data]
         no_E_train_data = [df.filter(pl.col('y')!=5) for df in no_null_train_data]
         trian_data_switch = {
@@ -45,7 +45,7 @@ class RLoader:
 
         # Access the list object  
         r_list = robjects.r['data']
-        data_session = []  # Store results as a list of tuples
+        data_session = []  # One session array per rat.
 
         # Ensure R to Pandas conversion is active
         with localconverter(robjects.default_converter + pandas2ri.converter):
@@ -66,7 +66,7 @@ class RLoader:
         # Access the list object  
         r_list = robjects.r['train_data']
 
-        train_data = []  # Store results as a list of tuples
+        train_data = []  # One training DataFrame per rat.
 
         # Ensure R to Pandas conversion is active
         with localconverter(robjects.default_converter + pandas2ri.converter):
@@ -80,7 +80,7 @@ class RLoader:
                     df_pandas = robjects.conversion.rpy2py(df_r).to_frame()
 
                     # Add the data to the combined dictionary
-                    combined_data[key] = df_pandas.iloc[:, 0].values  # Extract the column as a list
+                    combined_data[key] = df_pandas.iloc[:, 0].values  # Extract the column as a NumPy array.
 
                 # Create a Polars DataFrame from the combined data
                 pl_df = pl.DataFrame(combined_data)
@@ -97,7 +97,7 @@ class RLoader:
         # Access the list object  
         r_list = robjects.r['test_data']
 
-        test_data = []  # Store results as a list of tuples
+        test_data = []  # One test DataFrame per rat.
 
         # Ensure R to Pandas conversion is active
         with localconverter(robjects.default_converter + pandas2ri.converter):
@@ -111,7 +111,7 @@ class RLoader:
                     df_pandas = robjects.conversion.rpy2py(df_r).to_frame()
 
                     # Add the data to the combined dictionary
-                    combined_data[key] = df_pandas.iloc[:, 0].values  # Extract the column as a list
+                    combined_data[key] = df_pandas.iloc[:, 0].values  # Extract the column as a NumPy array.
 
                 # Create a Polars DataFrame from the combined data
                 pl_df = pl.DataFrame(combined_data)

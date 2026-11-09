@@ -83,8 +83,7 @@ def load_inputs(dataset, data_root):
         parts = [factory(str(data_root), train=train, download=False) for train in (True, False)]
         pixels, y = prepare_binary_images(parts)
         return pixels, y
-    # The existing data loaders bind DATA_ROOT at import time. Override it only
-    # inside this experiment process; the shared repository configuration is untouched.
+    # Override the shared loaders' DATA_ROOT only in this process.
     from data import load as data_load
     data_load.DATA_ROOT = Path(data_root)
     if dataset == "har":

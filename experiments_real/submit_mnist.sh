@@ -1,10 +1,6 @@
 #!/bin/bash
 
-# 1 seed w/ 4 repetitions takes 2 mins, peaks memory <6GB
 
-# # --- QUICK TEST LIST ---
-# SEED_LIST=(1)
-# ALPHA_LIST=(0.1)
 
 # # --- FULL EXPERIMENT LIST ---
 SEED_LIST=($(seq 1 25))
@@ -17,10 +13,10 @@ MEMO=8G
 TIME=00-04:00:00                    
 CORE=1                              
 
-# Assemble order
+# Build the Slurm command.
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
 
-# Thred limit
+# Thread limits.
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -58,7 +54,7 @@ for SEED in ${SEED_LIST[@]}; do
             OUTF=$LOGS"/"$JOBN".out"
             ERRF=$LOGS"/"$JOBN".err"
             
-            # Assemble slurm order
+            # Build the job submission command.
             ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
             
             # Print and Submit

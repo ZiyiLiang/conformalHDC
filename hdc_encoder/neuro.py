@@ -1,5 +1,5 @@
-### FHRR Representation
-#choose Multivariate Gaussian $N_n(0,\Sigma)$ as the distribution to generate the encoding codebook for n features.
+# Fourier holographic reduced representation (FHRR).
+# Draw the feature encoding basis from a multivariate Gaussian.
 import numpy as np 
  
 
@@ -117,10 +117,10 @@ class RFF:
         for il in label:
             il_idx = np.where(y == il)[0]
             
-            # 1. Calculate the SUM of all hypervectors for this class. 
+            # Compute the weighted class sum.
             hv_il_sum = np.sum(trian_hvs[il_idx] * weights[il_idx].reshape(-1,1) , axis=0) 
             
-            # 2. Normalize the average hypervector to get the final, stable class prototype.
+            # Normalize the weighted class sum.
             codebook_1pass[il] = self.normalize(hv_il_sum)
 
         return codebook_1pass
@@ -146,10 +146,10 @@ class RFF:
                 # Calculate Similarity  
                 sim = self.similarity(sample_hv, current_prototype)
                 
-                # NEW WEIGHT: Higher weight if similarity is LOW 
+                # Give less similar samples greater weight.
                 weights[i] = max(1.0 - sim, 0.01)
 
-            # Re-build prototypes with the new "Novelty" weights
+            # Rebuild prototypes with the updated weights.
             codebook = self.build_class_prototypes(train_hvs, y, weights)
             
         return codebook
@@ -185,20 +185,18 @@ class RFF:
         for i in range(encoded_x_val.shape[0]): 
             # Decaying Alpha (Learning Rate)
             alpha = initial_alpha / (1 + decay_rate * i)  
-            # decode on my query
+            # Decode the next validation observation.
             query = encoded_x_val[i,:]
             pred_y = self.decode_1d(query, codebook_1pass)
             true_y = y_val[i] 
 
             # 1. FORGET (if wrong): Softly pull the wrong codebook vector away
             if pred_y != true_y:
-                # print('peanlize')
-                #C_wrong -= α query
                 codebook_1pass[pred_y] =  codebook_1pass[pred_y] - alpha * query
 
-                codebook_1pass[true_y] += alpha * query # Move purely to perceptron style?
+                codebook_1pass[true_y] += alpha * query # Update the true-class prototype.
 
-                # Re-normalize to keep phasors valid
+                # Normalize the updated prototypes.
                 codebook_1pass[pred_y] = self.normalize(codebook_1pass[pred_y])
                 codebook_1pass[true_y] = self.normalize(codebook_1pass[true_y])
            

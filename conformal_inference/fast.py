@@ -175,7 +175,7 @@ def chunks(items, size):
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
-# Engine shared with forked worker processes (copy-on-write, so nothing large is copied).
+# Forked workers share the engine arrays until those arrays are modified.
 _ENGINE = None
 
 

@@ -38,7 +38,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   #   - Set Size     = 1.0
   hdc_as_sets <- summary_vanilla_hdc(dat)
   
-  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  # Replace vanilla HDC set rows with singleton predictions.
   dat <- dat %>%
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
@@ -48,17 +48,17 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
   #------------------------------------------------
   
   # --- A. Set-Valued Metrics (Marginal Only) --- 
-  # spilt conformal
+  # Split conformal.
   set_metrics <- dat %>%
     filter(method == "split_conformal") %>%
     summary_set_val()
   
-  # jk
+  # Jackknife+.
   set_metrics_jk <- dat %>%
     filter(method == "jackknife_plus") %>%
     summary_set_val()
   
-  # fcp
+  # Full conformal.
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val()
@@ -97,7 +97,7 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
       AUROC      = fmt(ood_u,     ood_se)
     )
   
-  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  # Rename and order methods.
   formatted <- formatted %>%
     mutate(Method = case_when(
       score_type == "vanilla_full" ~ "HDC",
@@ -109,7 +109,6 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
       TRUE ~ score_type
     )) %>%
     filter(Method != "vanilla_train") %>%
-    # Use exact same order as 3-class
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
@@ -118,7 +117,6 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
   # --- F. Construct and save to LaTeX---
-  # Structure: Method | Cov Size | Acc | OOD |
   
   export_latex_table(
     df = formatted_standard,
@@ -142,15 +140,13 @@ create_mnist_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
-# Set your results directory here
 setwd(RESULT_ROOT) 
 mnist_data = load_exp_results("./mnist/")
 
 table_dir <- paste0(OUT_ROOT,'/mnist')
 
-# Generate for typical Alphas
+# Generate tables at the experiment significance levels.
 mnist_results = create_mnist_table(mnist_data, target_alpha = 0.05, save_dir = table_dir)
-# create_mnist_table(mnist_data, target_alpha = 0.1,  save_dir = table_dir)
 
 #-------------------------------------------------------------------------------
 #                           Fashion MNIST Exp
@@ -175,7 +171,7 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
   #   - Set Size     = 1.0
   hdc_as_sets <- summary_vanilla_hdc(dat)
   
-  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  # Replace vanilla HDC set rows with singleton predictions.
   dat <- dat %>%
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
@@ -185,17 +181,17 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
   #------------------------------------------------
   
   # --- A. Set-Valued Metrics (Marginal Only) --- 
-  # spilt conformal
+  # Split conformal.
   set_metrics <- dat %>%
     filter(method == "split_conformal") %>%
     summary_set_val()
   
-  # jk
+  # Jackknife+.
   set_metrics_jk <- dat %>%
     filter(method == "jackknife_plus") %>%
     summary_set_val()
   
-  # fcp
+  # Full conformal.
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val()
@@ -234,7 +230,7 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
       AUROC      = fmt(ood_u,     ood_se)
     )
   
-  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  # Rename and order methods.
   formatted <- formatted %>%
     mutate(Method = case_when(
       score_type == "vanilla_full" ~ "HDC",
@@ -246,7 +242,6 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
       TRUE ~ score_type
     )) %>%
     filter(Method != "vanilla_train") %>%
-    # Use exact same order as 3-class
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
@@ -255,7 +250,6 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
     select(Method, Cov_std, Size_std,Cov_jk, Size_jk,Cov_fcp, Size_fcp)
   
   # --- F. Construct and save to LaTeX---
-  # Structure: Method | Cov Size | Acc | OOD |
   
   export_latex_table(
     df = formatted_standard,
@@ -279,15 +273,13 @@ create_fmnist_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
-# Set your results directory here
 setwd(RESULT_ROOT) 
 fmnist_data = load_exp_results("./fashion_mnist/" )
 
 table_dir <- paste0(OUT_ROOT,'/fashion_mnist')
 
-# Generate for typical Alphas
+# Generate tables at the experiment significance levels.
 fminst_results = create_fmnist_table(fmnist_data, target_alpha = 0.05, save_dir = table_dir)
-# create_fmnist_table(fmnist_data, target_alpha = 0.1,  save_dir = table_dir)
 
 
 #-------------------------------------------------------------------------------
@@ -313,7 +305,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   #   - Set Coverage = Point Accuracy
   #   - Set Size     = 1.0
   hdc_as_sets <- summary_vanilla_hdc(dat)
-  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  # Replace vanilla HDC set rows with singleton predictions.
   dat <- dat %>%
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
@@ -323,17 +315,17 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
   #------------------------------------------------
   
   # --- A. Set-Valued Metrics (Marginal Only) ---
-  # spilt conformal
+  # Split conformal.
   set_metrics <- dat %>%
     filter(method == "split_conformal") %>%
     summary_set_val()
   
-  # jk
+  # Jackknife+.
   set_metrics_jk <- dat %>%
     filter(method == "jackknife_plus") %>%
     summary_set_val()
   
-  # fcp
+  # Full conformal.
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val()
@@ -371,7 +363,7 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
       AveragePrecision = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
-  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  # Rename and order methods.
   formatted <- formatted %>%
     mutate(Method = case_when(
       score_type == "vanilla_full" ~ "HDC",
@@ -383,7 +375,6 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
       TRUE ~ score_type
     )) %>%
     filter(Method != "vanilla_train") %>%
-    # Use exact same order as 3-class
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
@@ -416,7 +407,6 @@ create_pamap2_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
-# Set your results directory here
 setwd(RESULT_ROOT)
 results_dir <- "./pamap2/" 
 
@@ -424,9 +414,8 @@ pampa2_data = load_exp_results("./pamap2/")
 
 table_dir <- paste0(OUT_ROOT,'/pamap2')
 
-# Generate for typical Alphas
+# Generate tables at the experiment significance levels.
 pamap2_results = create_pamap2_table(pampa2_data, target_alpha = 0.1, save_dir = table_dir)
-# create_pamap2_table(pampa2_data, target_alpha = 0.2,  save_dir = table_dir)
 
 #-------------------------------------------------------------------------------
 #                           UCI HAR Exp
@@ -452,7 +441,7 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   #   - Set Size     = 1.0
   hdc_as_sets <- summary_vanilla_hdc(dat)
   
-  # Remove any existing "set_valued" rows for vanilla_full and bind the new logic
+  # Replace vanilla HDC set rows with singleton predictions.
   dat <- dat %>%
     filter(!(score_type == "vanilla_full" & exp == "set_valued")) %>%
     bind_rows(hdc_as_sets)
@@ -462,17 +451,17 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
   #------------------------------------------------
   
   # --- A. Set-Valued Metrics (Marginal Only) ---
-  # spilt conformal
+  # Split conformal.
   set_metrics <- dat %>%
     filter(method == "split_conformal") %>%
     summary_set_val()
   
-  # jk
+  # Jackknife+.
   set_metrics_jk <- dat %>%
     filter(method == "jackknife_plus") %>%
     summary_set_val()
   
-  # fcp
+  # Full conformal.
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val()
@@ -510,7 +499,7 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
       AveragePrecision      = fmt(ap_u,     ap_se),
       AUROC      = fmt(ood_u,     ood_se)
     )
-  # --- E. Rename & Reorder (Strict 3-Class Convention) ---
+  # Rename and order methods.
   formatted <- formatted %>%
     mutate(Method = case_when(
       score_type == "vanilla_full" ~ "HDC",
@@ -522,7 +511,6 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
       TRUE ~ score_type
     )) %>%
     filter(Method != "vanilla_train") %>%
-    # Use exact same order as 3-class
     arrange(factor(Method, levels = c("HDC", "Inv. quantile", "Penalized",
                                       "Similarity", "CHDC-ratio", "CHDC-discount")))
   formatted_standard = formatted%>%
@@ -553,13 +541,12 @@ create_uci_har_table <- function(df, target_alpha, save_dir = NULL) {
 #------------------
 # Save Table 
 #------------------
-# Set your results directory here
 setwd(RESULT_ROOT) 
 uci_har_data = load_exp_results("./uci_har/" )
 
 table_dir <- paste0(OUT_ROOT,'/uci_har')
 
-# Generate for typical Alphas
+# Generate tables at the experiment significance levels.
 ucihar_results = create_uci_har_table(uci_har_data, target_alpha = 0.1, save_dir = table_dir)
 
 # Runtime breakdown (timing_seed*.csv written next to the result CSVs)
@@ -674,17 +661,17 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
     bind_rows(hdc_as_sets)
   
   # --- A. Set-Valued Metrics (Marginal Only) ---
-  # spilt conformal
+  # Split conformal.
   set_metrics <- dat %>%
     filter(method == "split_conformal") %>%
     summary_set_val(Rat_Full)
   
-  # jk
+  # Jackknife+.
   set_metrics_jk <- dat %>%
     filter(method == "jackknife_plus") %>%
     summary_set_val(Rat_Full)
   
-  # fcp
+  # Full conformal.
   set_metrics_fcp <- dat %>%
     filter(method == "full_conformal") %>%
     summary_set_val(Rat_Full)
@@ -731,7 +718,6 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
         TRUE ~ score_type
       )
     ) %>%
-    # Use exact reordering logic
     arrange(factor(rat, levels = rat_names), 
             factor(Method, levels = c("HDC (train)", "HDC", "Inv. quantile", 
                                       "Penalized", "Similarity", "CHDC-ratio", "CHDC-discount")))
@@ -754,7 +740,6 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
   
   
   # --- F. Construct and save to LaTeX---
-  # # Align: Rat | Method | Cov Size | Acc AP | OOD
   # Align: Rat | Method | Cov Size | Acc AP | OOD
   std_header_cmd <- paste0(
     "\\toprule\n",
@@ -795,7 +780,6 @@ create_odor_full_table <- function(df, target_alpha, target_beta, save_dir = NUL
 #------------------
 # Execution
 #------------------
-# Set your results directory here
 setwd(RESULT_ROOT) 
 odor_data = load_exp_results(
   results_dir =  "./odor_decoding/", 
@@ -804,7 +788,6 @@ odor_data = load_exp_results(
 table_dir <- paste0(OUT_ROOT,'/odor_decoding')
 
 odor_table = create_odor_full_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
-# create_odor_summary_table(odor_data, target_alpha = 0.2, target_beta = 0.3, save_dir = table_dir)
 setwd(OUT_ROOT)
 plots = plot_odor_results(
   odor_data, 

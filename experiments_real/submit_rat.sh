@@ -1,11 +1,6 @@
 #!/bin/bash
 
-# One rat for 25 seeds takes 8 mins, peaks memory < 1GB
 
-# # --- QUICK TEST LIST ---
-# SEED_LIST=(1)
-# RAT_LIST=(0)
-# ALPHA_LIST=(0.2)
 
 # # --- FULL EXPERIMENT LIST ---
 SEED_LIST=($(seq 1 25))
@@ -19,10 +14,10 @@ MEMO=2G
 TIME=00-04:00:00                   
 CORE=1                              
 
-# Assemble order
+# Build the Slurm command.
 ORDP="sbatch --mem="$MEMO" --nodes=1 --ntasks=1 --cpus-per-task="$CORE" --time="$TIME" --partition=biodatascience.p"
 
-# Thred limit
+# Thread limits.
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -42,7 +37,7 @@ for RAT in ${RAT_LIST[@]}; do
         for ALPHA in ${ALPHA_LIST[@]}; do
             for BETA in ${BETA_LIST[@]}; do
             
-                # Define Job Name and Output File (Added BETA)
+                # Job name and result file.
                 JOBN="rat"$RAT"_seed"$SEED"_alpha"$ALPHA"_beta"$BETA
                 OUT_FILE=$OUT_DIR"/rat"$RAT"_seed"$SEED"_alpha"$ALPHA"_beta"$BETA".csv"
                 
@@ -62,7 +57,7 @@ for RAT in ${RAT_LIST[@]}; do
                     OUTF=$LOGS"/"$JOBN".out"
                     ERRF=$LOGS"/"$JOBN".err"
                     
-                    # Assemble order
+                    # Build the Slurm command.
                     ORD=$ORDP" -J "$JOBN" -o "$OUTF" -e "$ERRF" "$SCRIPT
                     
                     # Print and Submit

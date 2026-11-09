@@ -22,7 +22,7 @@ results/ood_diagnostics/ood_har/
 results/logs/ood_diagnostics/
 ```
 
-Each successful group writes score and ROC CSVs compressed with gzip, AUROC and
+Each successful group writes score and ROC CSVs compressed with gzip, AUC and
 operating-point CSVs, and a checksummed completion marker. Score rows retain the
 input sample index, original class label and partition. ROC curves treat OOD as
 positive, use `-ID_score`, and retain all thresholds. Calibrated rejection remains
@@ -93,9 +93,25 @@ selects a Linux environment with `bin/activate`.
 
 ## Repository-generated plots
 
-The plotting entrypoint is `experiments_ood/make_roc_plots.R`. It reads the new
-diagnostic exports and writes figures under `results/plots/ood_diagnostics`.
-Full output requires all four datasets and all 100 states. A deliberately small
-local run must use its explicit `--allow-partial` mode and remain labelled as a
-partial preview. No generated output should be hand-edited or reconstructed from
-the manuscript.
+The single R reporting entrypoint is `experiments_ood/make_plots.R`. It reads the
+diagnostic exports and writes figures and tables under
+`results/plots/ood_diagnostics`. The old separate ROC reporter has been removed.
+
+```bash
+Rscript experiments_ood/make_plots.R
+```
+
+Full output requires all four datasets and all 100 states. It includes the
+averaged ROC figure (`ood_roc.pdf`), the method-by-dataset AUC table
+(`ood_summary_table.tex`), its numerical summary (`ood_auc_summary.csv`),
+the averaged ROC coordinates, nominal operating summaries, four operating-grid
+tables and provenance metadata. AUC cells report mean (standard error) across
+individual repetitions. The figure uses CHDC-discount's manuscript red and the
+approved dataset-specific inset ranges. Figure points use the nominal alpha for
+MNIST, Fashion and PAMAP2 and the smallest saved alpha for UCI HAR (0.05);
+nominal operating tables retain UCI HAR's nominal alpha (0.1).
+
+Use `--score-diagnostics` to add `ood_score_cdfs.pdf`, which displays score CDFs
+for the first available repetition. A deliberately small local run must use
+explicit `--allow-partial` mode and remain labelled as a partial preview. No
+generated output should be hand-edited or reconstructed from the manuscript.
