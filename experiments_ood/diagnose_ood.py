@@ -120,7 +120,8 @@ def export_repetition(dataset, X, y, random_state, args):
 
 def validate_export(marker, output, config):
     """Validate this export's schema and internal integrity, without reading legacy results."""
-    if marker.get("run_config") != config or any(marker.get(key) != value for key, value in config.items()):
+    if (not common.run_configs_match(marker.get("run_config"), config, marker.get("git_revision")) or
+            any(marker.get(key) != value for key, value in marker["run_config"].items())):
         raise ValueError("Diagnostic configuration does not match the requested run")
     if marker.get("files") != file_names(config["seed_group"]):
         raise ValueError("Unexpected diagnostic filenames")

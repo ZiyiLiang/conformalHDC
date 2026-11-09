@@ -28,6 +28,7 @@ from conformal_inference.fast import class_prototypes
 from data.config import DATA_ROOT
 from hdc_encoder.image import encode_binary_images, make_position_hvs
 from hdc_encoder.level import encode_levels, make_im_cim
+from experiments_ood.completion import run_configs_match
 
 SCHEMA_VERSION = 1
 METHODS = ("maxsim", "discount", "energy")
@@ -265,7 +266,7 @@ def run_config(dataset, args):
 def is_complete(marker_path, config):
     try:
         marker = json.loads(marker_path.read_text())
-        if marker["run_config"] != config:
+        if not run_configs_match(marker["run_config"], config, marker.get("git_revision")):
             return False
         for key, multiplier in (("auroc", 1), ("operating", len(config["alpha_grid"]))):
             path = marker_path.parent / marker["files"][key]
