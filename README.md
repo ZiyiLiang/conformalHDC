@@ -12,9 +12,6 @@ Code for [ConformalHDC: Uncertainty-Aware Hyperdimensional Computing with Applic
 | `experiments_real/` | Benchmark and neural-decoding experiments; R reporting in `plot/`. |
 | `experiments_ood/` | OOD experiments and diagnostics. |
 | `notebook/` | Paper illustration and neural preprocessing notebooks. |
-| `notebooks/archive/` | Retired notebooks and their dependencies. |
-| `archive/` | Retired experiment scripts and encoders. |
-| `results/` | Generated results; figures and tables in `results/plots/` (not tracked). |
 
 ## Workflow
 
