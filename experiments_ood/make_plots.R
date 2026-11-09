@@ -1,7 +1,7 @@
 # Generate OOD ROC figures and comparison tables in R from diagnostic exports.
 
 DATASETS <- c(mnist = "MNIST", fashion_mnist = "Fashion", pamap2 = "PAMAP2", har = "UCI HAR")
-METHODS <- c(maxsim = "Max similarity", discount = "CHDC-discount", energy = "Energy")
+METHODS <- c(maxsim = "Max similarity", discount = "discount", energy = "Energy")
 NOMINAL_ALPHA <- c(mnist = 0.05, fashion_mnist = 0.05, pamap2 = 0.1, har = 0.1)
 
 require_columns <- function(df, columns, file) {
@@ -197,7 +197,7 @@ write_operating_table <- function(dataset, data, opts, path) {
   lines <- c("% Rejection rates are fractions; parentheses give standard errors across repetitions.",
              "\\begin{tabular}{@{}lcccccc@{}}", "\\toprule",
              partial_banner(7L, paste0(DATASETS[[dataset]], "; ", n, " repetitions"), opts$allow_partial),
-             " & \\multicolumn{2}{c}{Max similarity} & \\multicolumn{2}{c}{CHDC-discount} & \\multicolumn{2}{c}{Energy} \\\\",
+             " & \\multicolumn{2}{c}{Max similarity} & \\multicolumn{2}{c}{discount} & \\multicolumn{2}{c}{Energy} \\\\",
              "$\\alpha$ & ID FR $\\downarrow$ & OOD rejection $\\uparrow$ & ID FR $\\downarrow$ & OOD rejection $\\uparrow$ & ID FR $\\downarrow$ & OOD rejection $\\uparrow$ \\\\",
              "\\midrule")
   for (alpha in grid) {
