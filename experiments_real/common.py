@@ -121,6 +121,10 @@ def development_set(train, cal):
     """Train + calibration (hvs, labels), the data jackknife+ and full conformal fit on."""
     return np.concatenate((train[0], cal[0])), np.concatenate((train[1], cal[1]))
 
+def balance_ood(ood, n_test):
+    """Truncate the OOD split to at most as many samples as the test split."""
+    return ood[:min(len(ood), n_test)]
+
 def masked_sims_table(chdc, hvs, alphas):
     """masked[a, i, c]: similarity of hvs[i] to class c if c is in its label-conditional
     set at alphas[a], else -inf. Scores and similarities are computed once."""
@@ -370,7 +374,8 @@ def run_image_experiment(pixels, targets, labels_id, labels_ood, random_state, a
         cal = encode(cal_idx)
     with timed("encode_test"):
         test = encode(test_idx)
-    ood_hvs, _ = encode(ood_idx)
+    ood_idx = np.random.RandomState(random_state).permutation(ood_idx)
+    ood_hvs, _ = encode(balance_ood(ood_idx, len(test_idx)))
     log("Encoding complete.")
     return evaluate(train, cal, test, ood_hvs, labels_id, "bipolar", random_state, alpha)
 
@@ -407,7 +412,7 @@ def run_level_experiment(X, y, labels_id, labels_ood, test_size, levels, random_
         cal = encode_levels(X_cal, iM, CiM), y_cal
     with timed("encode_test"):
         test = encode_levels(X_test, iM, CiM), y_test
-    ood_hvs = encode_levels(X_ood, iM, CiM)
+    ood_hvs = encode_levels(balance_ood(X_ood, len(X_test)), iM, CiM)
     log("Encoding complete.")
     return evaluate(train, cal, test, ood_hvs, labels_id, "ternary", random_state, alpha)
 
