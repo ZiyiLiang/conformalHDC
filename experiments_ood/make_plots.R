@@ -1,7 +1,7 @@
 # Generate OOD ROC figures and comparison tables in R from diagnostic exports.
 
 DATASETS <- c(mnist = "MNIST", fashion_mnist = "Fashion", pamap2 = "PAMAP2", har = "UCI HAR")
-METHODS <- c(maxsim = "Max similarity", discount = "discount", energy = "Energy")
+METHODS <- c(maxsim = "Max similarity", discount = "Discount", energy = "Energy")
 NOMINAL_ALPHA <- c(mnist = 0.05, fashion_mnist = 0.05, pamap2 = 0.1, har = 0.1)
 
 require_columns <- function(df, columns, file) {
@@ -191,23 +191,31 @@ write_auc_table <- function(data, opts, path) {
   writeLines(c(lines, "\\botrule", "\\end{tabular}"), path)
 }
 
-write_operating_table <- function(dataset, data, opts, path) {
-  grid <- data$grid
-  n <- length(data$states)
+write_operating_table <- function(data, opts, path) {
+  ids <- opts$datasets
+  n_columns <- length(data[[ids[[1L]]]]$grid) + 1L
+  row_end <- paste0(" ", strrep("\\", 2L))
   lines <- c("% Rejection rates are fractions; parentheses give standard errors across repetitions.",
-             "\\begin{tabular}{@{}lcccccc@{}}", "\\toprule",
-             partial_banner(7L, paste0(DATASETS[[dataset]], "; ", n, " repetitions"), opts$allow_partial),
-             " & \\multicolumn{2}{c}{Max similarity} & \\multicolumn{2}{c}{discount} & \\multicolumn{2}{c}{Energy} \\\\",
-             "$\\alpha$ & ID FR $\\downarrow$ & OOD rejection $\\uparrow$ & ID FR $\\downarrow$ & OOD rejection $\\uparrow$ & ID FR $\\downarrow$ & OOD rejection $\\uparrow$ \\\\",
-             "\\midrule")
-  for (alpha in grid) {
-    cells <- unlist(lapply(names(METHODS), function(method) {
-      rows <- data$operating[data$operating$method == method &
-                              abs(data$operating$alpha - alpha) < 1e-12, ]
-      c(metric_cell(rows$id_false_rejection), metric_cell(rows$ood_rejection))
-    }), use.names = FALSE)
-    alpha_label <- format(alpha, scientific = FALSE, trim = TRUE, digits = 6)
-    lines <- c(lines, paste0(alpha_label, " & ", paste(cells, collapse = " & "), " \\\\"))
+             paste0("\\begin{tabular}{@{}l", strrep("c", n_columns - 1L), "@{}}"), "\\toprule",
+             partial_banner(n_columns, paste(DATASETS[ids], collapse = ", "), opts$allow_partial))
+  for (dataset in ids) {
+    grid <- data[[dataset]]$grid
+    if (dataset != ids[[1L]]) lines <- c(lines, "\\midrule")
+    alpha_labels <- vapply(grid, function(alpha) {
+      format(alpha, scientific = FALSE, trim = TRUE, digits = 6)
+    }, character(1))
+    lines <- c(lines,
+               paste0("\\multicolumn{", n_columns, "}{c}{\\textbf{", DATASETS[[dataset]], "}}", row_end),
+               paste0("Method & ", paste(paste0("$\\alpha=", alpha_labels, "$"), collapse = " & "), row_end),
+               "\\midrule")
+    for (method in names(METHODS)) {
+      cells <- vapply(grid, function(alpha) {
+        rows <- data[[dataset]]$operating[data[[dataset]]$operating$method == method &
+                                          abs(data[[dataset]]$operating$alpha - alpha) < 1e-12, ]
+        metric_cell(rows$ood_rejection)
+      }, character(1))
+      lines <- c(lines, paste0(METHODS[[method]], " & ", paste(cells, collapse = " & "), row_end))
+    }
   }
   writeLines(c(lines, "\\botrule", "\\end{tabular}"), path)
 }
@@ -650,10 +658,7 @@ run_roc_reporting <- function(opts, script) {
   write_nominal_roc_table(nominal, opts, helper, path("ood_nominal_summary.tex"))
   metric_data <- lapply(data, `[[`, "metrics")
   helper$write_auc_table(metric_data, opts, path("ood_summary_table.tex"))
-  for (dataset in opts$datasets) {
-    helper$write_operating_table(dataset, metric_data[[dataset]], opts,
-                                 path(paste0("ood_operating_", dataset, ".tex")))
-  }
+  helper$write_operating_table(metric_data, opts, path("ood_operating_table.tex"))
   write_roc_pdf(data, opts, helper, path("ood_roc.pdf"))
   if (opts$score_diagnostics) write_score_cdf_pdf(data, opts, helper, path("ood_score_cdfs.pdf"))
   metadata <- list(
